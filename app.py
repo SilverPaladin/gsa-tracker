@@ -3,10 +3,9 @@ import sqlite3
 from datetime import datetime, date, timedelta
 from streamlit_quill import st_quill 
 
-# --- 1. DATABASE ---
+# --- 1. DATABASE & TABLES ---
 conn = sqlite3.connect('gsa_portal_final.db', check_same_thread=False)
 c = conn.cursor()
-# Ensure all tables exist
 c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT, username TEXT, role TEXT, status TEXT)')
 c.execute('CREATE TABLE IF NOT EXISTS mods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, severity INTEGER, details TEXT, is_done INTEGER)')
 c.execute('CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, mod_id INTEGER, user TEXT, timestamp TEXT, comment TEXT)')
@@ -19,7 +18,7 @@ if "view" not in st.session_state: st.session_state.view = "HOME"
 if "active_mod_id" not in st.session_state: st.session_state.active_mod_id = None
 if "sel_date" not in st.session_state: st.session_state.sel_date = str(date.today())
 
-# --- 3. CLEAN CSS (Sharp Edges, No Gaps) ---
+# --- 3. CLEAN UI CSS ---
 st.set_page_config(page_title="GSA COMMAND", layout="wide")
 st.markdown("""
 <style>
@@ -46,7 +45,7 @@ st.markdown("""
         color: #949ba4 !important;
         text-align: left !important;
         padding: 5px 20px !important;
-        font-size: 13px !outset;
+        font-size: 13px !important;
     }
 
     .stButton>button:hover, .stButton>button:focus {
@@ -60,7 +59,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 4. SECURED LOGIN (No Auto-Login) ---
+# --- 4. SECURED LOGIN & BOOTSTRAP ---
 if not st.session_state.logged_in:
     _, col, _ = st.columns([1, 1, 1])
     with col:
@@ -70,7 +69,11 @@ if not st.session_state.logged_in:
         
         c1, c2 = st.columns(2)
         if c1.button("LOG IN"):
-            # Strictly checking database for match
+            # BOOTSTRAP SUPER ADMIN
+            if email == "armasupplyguy@gmail.com":
+                c.execute("INSERT OR IGNORE INTO users VALUES (?,?,?,?,?)", (email, pwd, "SUPPLY", "Super Admin", "Approved"))
+                conn.commit()
+
             user = c.execute("SELECT username, role, status FROM users WHERE email=? AND password=?", (email, pwd)).fetchone()
             if user:
                 if user[2] == "Approved":
@@ -95,10 +98,15 @@ if not st.session_state.logged_in:
     st.stop()
 
 # --- 5. SIDEBAR NAVIGATION ---
+role = st.session_state.role
 with st.sidebar:
     st.markdown("<h4 style='color:#5865f2; margin: 15px 0 0 20px; font-weight:900;'>GSA HQ</h4>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color:#4e5058; font-size:10px; margin: -5px 0 20px 20px;'>OPERATOR: {st.session_state.user.upper()}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color:#4e5058; font-size:10px; margin: -5px 0 20px 20px;'>OPERATOR: {st.session_state.user.upper()} | {role.upper()}</p>", unsafe_allow_html=True)
     
+    if role == "Super Admin":
+        st.markdown('<div class="section-header">MASTER CONTROL</div>', unsafe_allow_html=True)
+        if st.button("USER PERMISSIONS"): st.session_state.view = "PERMISSIONS"; st.rerun()
+
     st.markdown('<div class="section-header">SERVER ADMIN</div>', unsafe_allow_html=True)
     if st.button("NEW PROBLEM"): st.session_state.view = "LOG_MOD"; st.rerun()
     for mid, mname in c.execute("SELECT id, name FROM mods WHERE is_done=0").fetchall():
@@ -116,8 +124,23 @@ with st.sidebar:
     st.markdown("<div style='margin-top: 40px;'></div>")
     if st.button("LOGOUT"): st.session_state.logged_in = False; st.rerun()
 
-# --- 6. WORKSPACES (Restored Logic) ---
-if st.session_state.view == "CALENDAR":
+# --- 6. WORKSPACES ---
+
+# MASTER CONTROL: ADMIN ONLY
+if st.session_state.view == "PERMISSIONS" and role == "Super Admin":
+    st.markdown("### USER ACCESS CONTROL")
+    all_users = c.execute("SELECT email, username, role, status FROM users").fetchall()
+    for u_email, u_name, u_role, u_status in all_users:
+        with st.container():
+            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+            col1.write(f"**{u_name}** ({u_email})")
+            nr = col2.selectbox("Role", ["User", "Admin", "CLPLEAD", "Super Admin"], index=["User", "Admin", "CLPLEAD", "Super Admin"].index(u_role), key=f"r_{u_email}")
+            ns = col3.selectbox("Status", ["Pending", "Approved"], index=["Pending", "Approved"].index(u_status), key=f"s_{u_email}")
+            if col4.button("Update", key=f"u_{u_email}"):
+                c.execute("UPDATE users SET role=?, status=? WHERE email=?", (nr, ns, u_email))
+                conn.commit(); st.rerun()
+
+elif st.session_state.view == "CALENDAR":
     st.markdown("### 🗓️ TRAINING ROSTER")
     left, right = st.columns([1.5, 1])
     with left:
