@@ -417,7 +417,8 @@ elif st.session_state.page == "json_editor":
             st.session_state.editor_content = json_text
 
         with col_tools:
-            tab_search, tab_saved = st.tabs(["🌐 Search Workshop", "💾 Saved Library"])
+            # Added "Import" Tab here
+            tab_search, tab_saved, tab_import = st.tabs(["🌐 Search", "💾 Library", "📥 Import"])
             
             with tab_search:
                 st.info("💡 **Tip:** Type a name to find the link, then Paste the URL to fetch data.")
@@ -474,17 +475,13 @@ elif st.session_state.page == "json_editor":
                 if not filtered: st.info("No saved mods.")
                 for mod in filtered:
                     with st.container(border=True):
-                        # FIX: Using 'vertical_alignment="center"' aligns icons perfectly in box.
-                        # Ratios [3, 1, 1, 1] give plenty of room for buttons.
                         c_info, c_add, c_copy, c_del = st.columns([3, 1, 1, 1], vertical_alignment="center")
                         
-                        # Mod Name
                         with c_info:
                             st.write(f"**{mod['name']}**")
                             mini_json = {"modId": mod['modId'], "name": mod['name'], "version": ""}
                             json_str = json.dumps(mini_json, indent=4)
 
-                        # ADD Button
                         with c_add:
                             if st.button("➕", key=f"ins_{mod['modId']}", help="Insert into Editor", use_container_width=True):
                                 snippet = json_str
@@ -498,16 +495,58 @@ elif st.session_state.page == "json_editor":
                                 st.session_state.main_json_editor = new_s
                                 st.rerun()
                         
-                        # COPY Button
                         with c_copy:
                             with st.popover("📋", use_container_width=True):
                                 st.code(json_str, language='json')
                                 st.caption("Click the icon in the corner to copy.")
 
-                        # DEL Button
                         with c_del:
                             if st.button("🗑️", key=f"rm_{mod['modId']}", help="Delete from Library", use_container_width=True):
                                 idx = DB['mod_library'].index(mod)
                                 DB['mod_library'].pop(idx)
                                 save_db(DB)
                                 st.rerun()
+            
+            # --- TAB 3: IMPORT ---
+            with tab_import:
+                st.subheader("Batch Importer")
+                st.caption("Paste a full JSON file or a list of mods. We will extract every mod block and save it to your library.")
+                import_text = st.text_area("Paste JSON Here", height=300)
+                
+                if st.button("Process & Import Mods", type="primary"):
+                    try:
+                        # 1. Regex to find {"modId": "..." ...} blocks
+                        # We look for simple structure patterns to avoid strict JSON errors
+                        pattern = r'\{[^{}]*"modId"[^{}]*\}'
+                        matches = re.findall(pattern, import_text, re.DOTALL)
+                        
+                        count_added = 0
+                        existing_ids = [m['modId'] for m in DB['mod_library']]
+                        
+                        for match in matches:
+                            try:
+                                mod_obj = json.loads(match)
+                                mid = mod_obj.get("modId")
+                                mname = mod_obj.get("name", "Unknown Imported Mod")
+                                mver = mod_obj.get("version", "")
+                                
+                                if mid and mid not in existing_ids:
+                                    DB['mod_library'].append({
+                                        "modId": mid,
+                                        "name": mname,
+                                        "version": mver
+                                    })
+                                    existing_ids.append(mid)
+                                    count_added += 1
+                            except:
+                                pass # skip bad blocks
+                        
+                        if count_added > 0:
+                            save_db(DB)
+                            st.success(f"Successfully imported {count_added} new mods to Library!")
+                            st.rerun()
+                        else:
+                            st.warning("No new mods found (or all were duplicates).")
+                            
+                    except Exception as e:
+                        st.error(f"Error processing text: {e}")
