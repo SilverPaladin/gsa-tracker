@@ -474,8 +474,8 @@ elif st.session_state.page == "json_editor":
                 if not filtered: st.info("No saved mods.")
                 for mod in filtered:
                     with st.container(border=True):
-                        # UPDATED UI: Text Buttons instead of Icons
-                        c_info, c_add, c_copy, c_del = st.columns([5, 1.2, 1.2, 1.2])
+                        # UPDATED UI: Simple Icons
+                        c_info, c_add, c_copy, c_del = st.columns([6, 1, 1, 1])
                         
                         # Mod Name
                         with c_info:
@@ -483,9 +483,9 @@ elif st.session_state.page == "json_editor":
                             mini_json = {"modId": mod['modId'], "name": mod['name'], "version": ""}
                             json_str = json.dumps(mini_json, indent=4)
 
-                        # ADD Button
+                        # ADD Button (Icon: ➕)
                         with c_add:
-                            if st.button("ADD", key=f"ins_{mod['modId']}", help="Insert into Editor", use_container_width=True):
+                            if st.button("➕", key=f"ins_{mod['modId']}", help="Insert into Editor", use_container_width=True):
                                 snippet = json_str
                                 cur = st.session_state.editor_content.strip()
                                 if not cur: cur = "[]"
@@ -497,15 +497,15 @@ elif st.session_state.page == "json_editor":
                                 st.session_state.main_json_editor = new_s
                                 st.rerun()
                         
-                        # COPY Button
+                        # COPY Button (Icon: 📋)
                         with c_copy:
-                            with st.popover("COPY", use_container_width=True):
+                            with st.popover("📋", use_container_width=True):
                                 st.code(json_str, language='json')
-                                st.caption("Click the copy icon above.")
+                                st.caption("Click the icon in the corner to copy.")
 
-                        # DEL Button
+                        # DEL Button (Icon: 🗑️)
                         with c_del:
-                            if st.button("DEL", key=f"rm_{mod['modId']}", help="Delete from Library", use_container_width=True):
+                            if st.button("🗑️", key=f"rm_{mod['modId']}", help="Delete from Library", use_container_width=True):
                                 idx = DB['mod_library'].index(mod)
                                 DB['mod_library'].pop(idx)
                                 save_db(DB)
