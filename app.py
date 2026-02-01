@@ -388,7 +388,6 @@ elif st.session_state.page == "json_editor":
                     if st.button("📂 Load Preset") and selected_conf != "Select...":
                         found = next((c for c in DB['server_configs'] if c['name'] == selected_conf), None)
                         if found:
-                            # IMPORTANT: Update both session state AND key value
                             st.session_state.editor_content = found['content']
                             st.session_state.main_json_editor = found['content'] 
                             st.success(f"Loaded '{selected_conf}'!")
@@ -414,7 +413,6 @@ elif st.session_state.page == "json_editor":
             st.divider()
             st.subheader("Active JSON Editor")
             st.caption("Press 'Ctrl+A' then 'Ctrl+C' inside the box to copy everything.")
-            # Note: value=... is only used on first render. key=... binds it to session state.
             json_text = st.text_area("JSON Output", value=st.session_state.editor_content, height=600, key="main_json_editor")
             st.session_state.editor_content = json_text
 
@@ -476,18 +474,20 @@ elif st.session_state.page == "json_editor":
                 if not filtered: st.info("No saved mods.")
                 for mod in filtered:
                     with st.container(border=True):
-                        # CONDENSED VIEW
-                        c_info, c_add, c_del = st.columns([5, 1, 1])
-                        with c_info:
+                        # CONDENSED LIBRARY VIEW
+                        c1, c2, c3, c4 = st.columns([6, 1, 1, 1])
+                        
+                        # Mod Name
+                        with c1:
                             st.write(f"**{mod['name']}**")
-                            # QUICK COPY AREA
+                            # Preparing JSON for copy
                             mini_json = {"modId": mod['modId'], "name": mod['name'], "version": ""}
-                            st.code(json.dumps(mini_json, indent=4), language='json')
+                            json_str = json.dumps(mini_json, indent=4)
 
-                        with c_add:
-                            st.write("") # Spacer
+                        # Add Button
+                        with c2:
                             if st.button("➕", key=f"ins_{mod['modId']}", help="Insert into Editor"):
-                                snippet = json.dumps(mini_json, indent=4)
+                                snippet = json_str
                                 cur = st.session_state.editor_content.strip()
                                 if not cur: cur = "[]"
                                 if cur.endswith("]"): 
@@ -497,8 +497,15 @@ elif st.session_state.page == "json_editor":
                                 st.session_state.editor_content = new_s
                                 st.session_state.main_json_editor = new_s
                                 st.rerun()
-                        with c_del:
-                            st.write("") # Spacer
+                        
+                        # Copy Button (Using Popover to hide code)
+                        with c3:
+                            with st.popover("📋", help="Copy JSON"):
+                                st.code(json_str, language='json')
+                                st.caption("Click the icon in the top-right of the box above to copy.")
+
+                        # Delete Button
+                        with c4:
                             if st.button("🗑️", key=f"rm_{mod['modId']}", help="Delete from Library"):
                                 idx = DB['mod_library'].index(mod)
                                 DB['mod_library'].pop(idx)
