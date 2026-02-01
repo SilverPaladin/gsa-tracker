@@ -3,18 +3,13 @@ import sqlite3
 from datetime import datetime, date, timedelta
 from streamlit_quill import st_quill 
 
-# --- 1. DATABASE RESTORATION (ALL TABLES) ---
-conn = sqlite3.connect('gsa_portal_restore.db', check_same_thread=False)
+# --- 1. DATABASE & TABLES ---
+conn = sqlite3.connect('gsa_portal_restore_v5_1.db', check_same_thread=False)
 c = conn.cursor()
-
-c.execute('''CREATE TABLE IF NOT EXISTS users 
-             (email TEXT UNIQUE, password TEXT, username TEXT, role TEXT, status TEXT)''')
-c.execute('''CREATE TABLE IF NOT EXISTS mods 
-             (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, severity INTEGER, details TEXT, is_done INTEGER)''')
-c.execute('''CREATE TABLE IF NOT EXISTS comments 
-             (id INTEGER PRIMARY KEY AUTOINCREMENT, mod_id INTEGER, user TEXT, timestamp TEXT, comment TEXT)''')
-c.execute('''CREATE TABLE IF NOT EXISTS events 
-             (date_val TEXT PRIMARY KEY, type TEXT)''')
+c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT, username TEXT, role TEXT, status TEXT)')
+c.execute('CREATE TABLE IF NOT EXISTS mods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, severity INTEGER, details TEXT, is_done INTEGER)')
+c.execute('CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, mod_id INTEGER, user TEXT, timestamp TEXT, comment TEXT)')
+c.execute('CREATE TABLE IF NOT EXISTS events (date_val TEXT PRIMARY KEY, type TEXT)')
 conn.commit()
 
 # --- 2. SESSION STATE ---
@@ -23,206 +18,191 @@ if "view" not in st.session_state: st.session_state.view = "HOME"
 if "active_mod_id" not in st.session_state: st.session_state.active_mod_id = None
 if "sel_date" not in st.session_state: st.session_state.sel_date = str(date.today())
 
-# --- 3. CSS (The Clean "Discord" Style you approved) ---
+# --- 3. CSS MATCHING YOUR SCREENSHOTS ---
 st.set_page_config(page_title="GSA COMMAND", layout="wide")
-
 st.markdown("""
 <style>
-    /* Global Pitch Black Theme */
+    /* 1. Dark Background */
     .stApp { background-color: #0b0c0e; }
-    [data-testid="stSidebar"] { 
-        background-color: #000000 !important; 
-        border-right: 1px solid #1e1e1e !important; 
-        width: 260px !important;
-    }
+    [data-testid="stSidebar"] { background-color: #000000 !important; border-right: 1px solid #1e1e1e !important; }
     
-    /* Zero Padding/Gap Reset */
-    .block-container { padding: 1rem 2rem !important; }
-    div[data-testid="stVerticalBlock"] { gap: 0rem !important; }
-
-    /* The Grey Bar Section Headers */
-    .sidebar-section {
-        background-color: #2b2d31;
-        color: #ffffff;
-        padding: 6px 15px;
-        font-weight: 800;
-        font-size: 11px;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        margin: 15px 0 5px 0;
+    /* 2. Top Menu / Headers */
+    .brand-header {
+        color: #5865f2;
+        font-size: 20px;
+        font-weight: 900;
+        margin: 10px 0 0 10px;
+        font-family: sans-serif;
+    }
+    .operator-tag {
+        color: #777;
+        font-size: 10px;
+        margin: 0 0 20px 10px;
+        font-family: sans-serif;
     }
 
-    /* Flat Text Sidebar Buttons (No Boxes) */
+    /* 3. Grey Section Bars (image_4f04d3.png) */
+    .sidebar-section {
+        background-color: #2b2d31; /* Grey Background */
+        color: #ffffff;
+        padding: 8px 12px;
+        font-weight: 700;
+        font-size: 11px;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        margin-top: 10px;
+        margin-bottom: 2px;
+    }
+
+    /* 4. Sidebar Buttons (image_4ef91a.png) */
     .stButton>button {
         width: 100% !important;
         background-color: transparent !important;
         border: none !important;
-        color: #949ba4 !important;
+        color: #949ba4 !important; /* Muted Text */
         text-align: left !important;
-        padding: 4px 18px !important;
+        padding: 6px 15px !important;
         font-size: 13px !important;
         font-weight: 500 !important;
-        min-height: 32px !important;
+        border-radius: 0px !important;
+        margin: 0px !important;
     }
 
-    /* Selection/Hover Highlight (Blue Bar) */
-    .stButton>button:hover, .stButton>button:focus {
+    /* Blue Vertical Line on Hover/Focus */
+    .stButton>button:hover, .stButton>button:focus, .stButton>button:active {
         color: #ffffff !important;
-        background-color: #1e1f22 !important;
-        border-left: 2px solid #5865f2 !important;
+        background-color: #1e1f22 !important; 
+        border-left: 3px solid #5865f2 !important; /* The Blue Line */
         box-shadow: none !important;
     }
 
-    /* Roster & Chat UI */
-    .chat-box {
-        background: #111214;
+    /* 5. Main Content Styles */
+    .block-container { padding: 2rem 3rem !important; }
+    div[data-testid="stVerticalBlock"] { gap: 0rem !important; }
+    
+    /* Chat & Roster Cards */
+    .chat-bubble {
+        background-color: #111214;
         border-left: 2px solid #5865f2;
-        padding: 8px;
-        margin-bottom: 2px;
-        font-size: 12px;
+        padding: 10px;
+        margin-bottom: 8px;
+        font-size: 13px;
     }
-    .roster-item {
-        background: #000;
+    .roster-card {
+        background-color: #111214;
         border: 1px solid #1e1e1e;
-        padding: 10px 14px;
-        margin-bottom: 2px;
+        padding: 10px;
+        margin-bottom: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 4. AUTHENTICATION (WITH YOUR FIX) ---
+# --- 4. LOGIN LOGIC (Auto-Admin Fix) ---
 if not st.session_state.logged_in:
     _, col, _ = st.columns([1, 1, 1])
     with col:
-        st.markdown("<h3 style='text-align:center; color:#5865f2;'>GSA HQ</h3>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center; color:#5865f2;'>GSA HQ</h2>", unsafe_allow_html=True)
         email = st.text_input("EMAIL").lower().strip()
         pwd = st.text_input("PASSWORD", type="password")
         
-        c1, c2 = st.columns(2)
-        if c1.button("LOG IN"):
-            # --- THE FIX: FORCE ADMIN FOR YOU ---
+        if st.button("LOG IN"):
+            # FORCE ADMIN
             if email == "armasupplyguy@gmail.com":
                 c.execute("INSERT OR REPLACE INTO users (email, password, username, role, status) VALUES (?, ?, 'SUPPLY', 'Super Admin', 'Approved')", (email, pwd))
                 conn.commit()
-            # ------------------------------------
 
             user = c.execute("SELECT username, role, status FROM users WHERE email=? AND password=?", (email, pwd)).fetchone()
-            if user:
-                if user[2] == "Approved":
-                    st.session_state.update({"logged_in": True, "user": user[0], "role": user[1]})
-                    st.rerun()
-                else: st.warning("ACCOUNT PENDING.")
-            else: st.error("INVALID.")
-
-        if c2.button("REGISTER"):
-            st.session_state.view = "REGISTER"
-            st.rerun()
-
-    if st.session_state.view == "REGISTER":
-        with col:
-            new_u = st.text_input("USERNAME")
-            if st.button("CREATE ACCOUNT"):
-                try:
-                    c.execute("INSERT INTO users VALUES (?,?,?,?,?)", (email, pwd, new_u, "User", "Pending"))
-                    conn.commit(); st.success("SENT TO ADMIN.")
-                except: st.error("EXISTS.")
+            if user and user[2] == "Approved":
+                st.session_state.update({"logged_in": True, "user": user[0], "role": user[1]})
+                st.rerun()
+            else: st.error("ACCESS DENIED.")
     st.stop()
 
-# --- 5. SIDEBAR (Full Logic Restored) ---
+# --- 5. SIDEBAR (Restored Top Menu) ---
 role = st.session_state.role
 with st.sidebar:
-    st.markdown("<h4 style='color:#5865f2; margin: 15px 0 0 16px; font-weight:900;'>GSA HQ</h4>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color:#4e5058; font-size:10px; margin: -5px 0 20px 16px;'>OPERATOR: {st.session_state.user.upper()} | {role.upper()}</p>", unsafe_allow_html=True)
+    # THE TOP MENU
+    st.markdown('<div class="brand-header">GSA HQ</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="operator-tag">OPERATOR: {st.session_state.user.upper()}</div>', unsafe_allow_html=True)
     
-    if role == "Super Admin":
-         st.markdown('<div class="sidebar-section">MASTER CONTROL</div>', unsafe_allow_html=True)
-         if st.button("USER PERMISSIONS"): st.session_state.view = "PERMISSIONS"; st.rerun()
-
+    # SERVER ADMIN SECTION
     st.markdown('<div class="sidebar-section">SERVER ADMIN</div>', unsafe_allow_html=True)
-    if st.button("LOG NEW PROBLEM"): st.session_state.view = "LOG_MOD"; st.rerun()
-    # List all broken mods
+    if st.button("NEW PROBLEM"): st.session_state.view = "LOG_MOD"; st.rerun()
+    # Dynamic List
     for mid, mname in c.execute("SELECT id, name FROM mods WHERE is_done=0").fetchall():
-        if st.button(mname.upper(), key=f"m_{mid}"):
+        if st.button(mname.upper(), key=f"nav_{mid}"):
             st.session_state.active_mod_id, st.session_state.view = mid, "MOD_VIEW"; st.rerun()
     
+    # CLP LEADS SECTION
     st.markdown('<div class="sidebar-section">CLP LEADS</div>', unsafe_allow_html=True)
     if st.button("TRAINING ROSTER"): st.session_state.view = "CALENDAR"; st.rerun()
+    if st.button("TUTORIALS"): st.session_state.view = "TUTS"; st.rerun()
     
+    # ARCHIVE SECTION
     st.markdown('<div class="sidebar-section">ARCHIVE</div>', unsafe_allow_html=True)
     for aid, aname in c.execute("SELECT id, name FROM mods WHERE is_done=1").fetchall():
-        if st.button(f"✓ {aname.upper()}", key=f"a_{aid}"):
+        if st.button(f"✓ {aname.upper()}", key=f"arch_{aid}"):
             st.session_state.active_mod_id, st.session_state.view = aid, "MOD_VIEW"; st.rerun()
 
     st.markdown("<div style='margin-top: 50px;'></div>", unsafe_allow_html=True)
     if st.button("DISCONNECT"): st.session_state.logged_in = False; st.rerun()
 
-# --- 6. WORKSPACES (Full Logic Restored) ---
+# --- 6. WORKSPACES (Restored Features) ---
 
-# PERMISSIONS (ADMIN ONLY)
-if st.session_state.view == "PERMISSIONS" and role == "Super Admin":
-    st.markdown("### USER PERMISSIONS")
-    for ue, un, ur, us in c.execute("SELECT email, username, role, status FROM users").fetchall():
-        with st.container():
-            c1, c2, c3, c4 = st.columns([2,1,1,1])
-            c1.write(f"**{un}** ({ue})")
-            nr = c2.selectbox("R", ["User","Admin","CLPLEAD","Super Admin"], index=["User","Admin","CLPLEAD","Super Admin"].index(ur), key=f"r_{ue}")
-            ns = c3.selectbox("S", ["Pending","Approved"], index=["Pending","Approved"].index(us), key=f"s_{ue}")
-            if c4.button("SAVE", key=f"up_{ue}"):
-                c.execute("UPDATE users SET role=?, status=? WHERE email=?", (nr, ns, ue))
-                conn.commit(); st.rerun()
-
-# CALENDAR
-elif st.session_state.view == "CALENDAR":
+# A. TRAINING ROSTER (Card View)
+if st.session_state.view == "CALENDAR":
     st.markdown("### 🗓️ TRAINING ROSTER")
-    col_l, col_r = st.columns([1.5, 1], gap="medium")
-    with col_l:
+    c1, c2 = st.columns([1.5, 1])
+    with c1:
         for i in range(12):
-            curr = date.today() + timedelta(days=i)
-            ev = c.execute("SELECT type FROM events WHERE date_val=?", (str(curr),)).fetchone()
-            st.markdown(f'<div class="roster-item"><b style="color:#43b581;">{curr.strftime("%A, %b %d")}</b><br>'
-                        f'<small style="color:#888;">{ev[0] if ev else "EMPTY"}</small></div>', unsafe_allow_html=True)
-            if st.button(f"EDIT {curr.strftime('%d %b')}", key=f"btn_{curr}"):
-                st.session_state.sel_date = str(curr); st.rerun()
-    with col_r:
+            d = date.today() + timedelta(days=i)
+            ev = c.execute("SELECT type FROM events WHERE date_val=?", (str(d),)).fetchone()
+            st.markdown(f"""
+            <div class="roster-card">
+                <span style="color:#43b581; font-weight:bold;">{d.strftime("%A, %b %d")}</span><br>
+                <span style="color:#aaa; font-size:12px;">{ev[0] if ev else "EMPTY"}</span>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button(f"EDIT {d.strftime('%d %b')}", key=f"ed_{d}"):
+                st.session_state.sel_date = str(d); st.rerun()
+    with c2:
         st.markdown(f"#### MANAGE: {st.session_state.sel_date}")
-        with st.form("ev_form", border=False):
-            info = st.text_area("MISSION BRIEFING", height=150)
-            if st.form_submit_button("SAVE"):
-                c.execute("INSERT OR REPLACE INTO events (date_val, type) VALUES (?,?)", (st.session_state.sel_date, info))
+        with st.form("cal_form"):
+            txt = st.text_area("MISSION BRIEFING", height=150)
+            if st.form_submit_button("SAVE ENTRY"):
+                c.execute("INSERT OR REPLACE INTO events (date_val, type) VALUES (?,?)", (st.session_state.sel_date, txt))
                 conn.commit(); st.rerun()
 
-# MOD VIEW
+# B. MOD VIEW (Chat Restored)
 elif st.session_state.view == "MOD_VIEW":
     mod = c.execute("SELECT * FROM mods WHERE id=?", (st.session_state.active_mod_id,)).fetchone()
     if mod:
         st.markdown(f"### {mod[1].upper()}")
-        cl, cr = st.columns([1.6, 1], gap="large")
-        with cl:
+        l, r = st.columns([1.8, 1])
+        with l:
             st.markdown(mod[3], unsafe_allow_html=True)
-            if st.button("RESOLVE" if not mod[4] else "RE-OPEN"):
+            st.write("---")
+            if st.button("MARK RESOLVED" if not mod[4] else "RE-OPEN ISSUE"):
                 c.execute("UPDATE mods SET is_done=? WHERE id=?", (1 if not mod[4] else 0, mod[0]))
                 conn.commit(); st.rerun()
-        with cr:
-            st.markdown("##### STAFF LOGS")
-            msg = st.text_input("ADD COMMENT...", key="chat_in")
-            if msg:
+        with r:
+            st.markdown("#### STAFF LOGS")
+            new_msg = st.text_input("Add update...", key="chat_in")
+            if new_msg:
                 c.execute("INSERT INTO comments (mod_id, user, timestamp, comment) VALUES (?,?,?,?)", 
-                          (mod[0], st.session_state.user, datetime.now().strftime("%H:%M"), msg))
+                          (mod[0], st.session_state.user, datetime.now().strftime("%H:%M"), new_msg))
                 conn.commit(); st.rerun()
+            
             for u, t, m in c.execute("SELECT user, timestamp, comment FROM comments WHERE mod_id=? ORDER BY id DESC", (mod[0],)).fetchall():
-                st.markdown(f'<div class="chat-box"><b>{u.upper()}</b> <span style="color:#5865f2">{t}</span><br>{m}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="chat-bubble"><b>{u}</b> <span style="color:#5865f2; font-size:11px;">{t}</span><br>{m}</div>', unsafe_allow_html=True)
 
-# LOG MOD
+# C. NEW PROBLEM (Form Restored)
 elif st.session_state.view == "LOG_MOD":
     st.markdown("### LOG NEW PROBLEM")
-    with st.form("new_mod_form", border=False):
-        n = st.text_input("NAME")
-        s = st.select_slider("SEVERITY", options=range(1, 11))
-        d = st_quill(placeholder="Briefing...")
-        if st.form_submit_button("COMMIT"):
-            c.execute("INSERT INTO mods (name, severity, details, is_done) VALUES (?,?,?,0)", (n, s, d))
+    with st.form("new_log"):
+        name = st.text_input("PROBLEM NAME")
+        sev = st.select_slider("SEVERITY", options=range(1, 11))
+        det = st_quill(placeholder="Enter detailed briefing...")
+        if st.form_submit_button("COMMIT TO SYSTEM"):
+            c.execute("INSERT INTO mods (name, severity, details, is_done) VALUES (?,?,?,0)", (name, sev, det))
             conn.commit(); st.session_state.view = "HOME"; st.rerun()
-
-else:
-    st.markdown("### SYSTEM ONLINE")
-    st.write("Awaiting selection.")
