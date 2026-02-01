@@ -474,8 +474,9 @@ elif st.session_state.page == "json_editor":
                 if not filtered: st.info("No saved mods.")
                 for mod in filtered:
                     with st.container(border=True):
-                        # UPDATED UI: Simple Icons
-                        c_info, c_add, c_copy, c_del = st.columns([6, 1, 1, 1])
+                        # FIX: Using 'vertical_alignment="center"' aligns icons perfectly in box.
+                        # Ratios [3, 1, 1, 1] give plenty of room for buttons.
+                        c_info, c_add, c_copy, c_del = st.columns([3, 1, 1, 1], vertical_alignment="center")
                         
                         # Mod Name
                         with c_info:
@@ -483,7 +484,7 @@ elif st.session_state.page == "json_editor":
                             mini_json = {"modId": mod['modId'], "name": mod['name'], "version": ""}
                             json_str = json.dumps(mini_json, indent=4)
 
-                        # ADD Button (Icon: ➕)
+                        # ADD Button
                         with c_add:
                             if st.button("➕", key=f"ins_{mod['modId']}", help="Insert into Editor", use_container_width=True):
                                 snippet = json_str
@@ -497,13 +498,13 @@ elif st.session_state.page == "json_editor":
                                 st.session_state.main_json_editor = new_s
                                 st.rerun()
                         
-                        # COPY Button (Icon: 📋)
+                        # COPY Button
                         with c_copy:
                             with st.popover("📋", use_container_width=True):
                                 st.code(json_str, language='json')
                                 st.caption("Click the icon in the corner to copy.")
 
-                        # DEL Button (Icon: 🗑️)
+                        # DEL Button
                         with c_del:
                             if st.button("🗑️", key=f"rm_{mod['modId']}", help="Delete from Library", use_container_width=True):
                                 idx = DB['mod_library'].index(mod)
