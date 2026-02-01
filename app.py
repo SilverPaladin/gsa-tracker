@@ -48,7 +48,8 @@ DB = load_db()
 # --- HELPER: WORKSHOP SCRAPER ---
 def fetch_mod_details(mod_input):
     """
-    Fetches Name, Version, and IMAGE from Arma Reforger Workshop URL.
+    Fetches Name and IMAGE from Arma Reforger Workshop URL.
+    Version is set to empty string "".
     """
     mod_id = mod_input.strip()
     if "reforger.armaplatform.com/workshop/" in mod_id:
@@ -73,8 +74,8 @@ def fetch_mod_details(mod_input):
             img_tag = soup.find("meta", property="og:image")
             mod_img = img_tag["content"] if img_tag else None
             
-            # 3. Default Version
-            mod_version = "1.0.0" 
+            # 3. Default Version (BLANK as requested)
+            mod_version = "" 
             
             return mod_id, mod_name, mod_img, mod_version
         else:
@@ -402,7 +403,6 @@ elif st.session_state.page == "json_editor":
                 # 1. SMART SEARCH
                 search_term = st.text_input("1. Search Term", placeholder="e.g. RHS Status Quo")
                 if search_term:
-                    # Generates a button that opens the OFFICIAL search page
                     st.link_button(f"🌐 Open Search: '{search_term}'", f"https://reforger.armaplatform.com/workshop?search={search_term}")
                 
                 st.divider()
@@ -429,10 +429,9 @@ elif st.session_state.page == "json_editor":
                     with st.container(border=True):
                         if mod['image_url']: st.image(mod['image_url'])
                         st.subheader(mod['name'])
-                        st.caption(f"ID: {mod['modId']} | v{mod['version']}")
                         
-                        # CLEAN JSON FOR COPY
-                        clean_mod = {"modId": mod['modId'], "name": mod['name'], "version": mod['version']}
+                        # CLEAN JSON FOR COPY (BLANK VERSION)
+                        clean_mod = {"modId": mod['modId'], "name": mod['name'], "version": ""}
                         st.code(json.dumps(clean_mod, indent=4), language='json')
                         
                         c1, c2 = st.columns(2)
@@ -463,8 +462,8 @@ elif st.session_state.page == "json_editor":
                 for mod in filtered:
                     with st.container(border=True):
                         st.write(f"**{mod['name']}**")
-                        # Mini JSON for Copy
-                        mini_json = {"modId": mod['modId'], "name": mod['name'], "version": mod['version']}
+                        # Mini JSON for Copy (BLANK VERSION)
+                        mini_json = {"modId": mod['modId'], "name": mod['name'], "version": ""}
                         st.code(json.dumps(mini_json, indent=4), language='json')
                         
                         c_ins, c_del = st.columns([3,1])
