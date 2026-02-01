@@ -32,50 +32,51 @@ if "page" not in st.session_state:
 user_role = st.session_state.role_db.get(USER_EMAIL, "CLP")
 
 # --- CUSTOM CSS FOR DARK GREY EDITOR ---
+# Note: Because streamlit-quill uses an iframe, deep styling is tricky.
+# We are setting the container background. If the white persists, it is an iframe limitation,
+# but this CSS targets every accessible part of the editor structure.
 st.markdown("""
     <style>
-        /* Force the background of the editor wrapper */
-        .stQuill {
+        /* Toolbar Background - Dark Grey */
+        .ql-toolbar {
             background-color: #333333 !important;
-            border-radius: 5px;
-        }
-        
-        /* Toolbar Styling */
-        .ql-toolbar.ql-snow {
-            background-color: #222222 !important;
-            border: 1px solid #444444 !important;
-            border-top-left-radius: 5px;
-            border-top-right-radius: 5px;
-        }
-        
-        /* Editor Area Styling */
-        .ql-container.ql-snow {
-            background-color: #333333 !important;
-            border: 1px solid #444444 !important;
-            color: #ffffff !important;
+            border-color: #555555 !important;
+            color: white !important;
         }
 
-        /* Input Text Color */
+        /* Editor Area Background - Dark Grey */
+        .ql-container {
+            background-color: #333333 !important;
+            border-color: #555555 !important;
+            color: white !important;
+        }
+        
+        /* The actual typing area */
         .ql-editor {
-            color: #ffffff !important;
             background-color: #333333 !important;
+            color: white !important;
         }
 
-        /* Icon & Picker colors for Dark Theme */
+        /* Fix Toolbar Button Icons (Stroke & Fill) */
         .ql-snow .ql-stroke {
-            stroke: #ffffff !important;
+            stroke: white !important;
         }
         .ql-snow .ql-fill {
-            fill: #ffffff !important;
+            fill: white !important;
         }
         .ql-snow .ql-picker {
-            color: #ffffff !important;
+            color: white !important;
         }
         
-        /* Placeholder Color */
-        .ql-editor.ql-blank::before {
-            color: #aaaaaa !important;
-            font-style: italic;
+        /* Dropdown options inside toolbar */
+        .ql-picker-options {
+            background-color: #333333 !important;
+            color: white !important;
+        }
+
+        /* Remove the white background from the main iframe container if visible */
+        iframe[title="streamlit_quill.quill"] {
+            background-color: #333333 !important;
         }
     </style>
 """, unsafe_allow_html=True)
