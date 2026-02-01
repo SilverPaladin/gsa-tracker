@@ -2,90 +2,103 @@ import streamlit as st
 import sqlite3
 
 # --- DATABASE SETUP ---
-conn = sqlite3.connect('gsa_2026_v2.db', check_same_thread=False)
+conn = sqlite3.connect('gsa_vision_2026.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT, username TEXT)')
-c.execute('CREATE TABLE IF NOT EXISTS categories (name TEXT UNIQUE)')
-c.execute('''CREATE TABLE IF NOT EXISTS projects 
-             (id INTEGER PRIMARY KEY, category TEXT, title TEXT, details TEXT, 
-              assigned_user TEXT, is_done INTEGER)''')
 conn.commit()
 
-# --- 2026 GLASS UI ---
+# --- IPHONE GLASS CHIC CSS ---
 st.markdown("""
 <style>
-    .main { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); color: white; }
-    [data-testid="stSidebar"] { background-color: rgba(255, 255, 255, 0.03); backdrop-filter: blur(15px); }
-    .stTabs [data-baseweb="tab-list"] { gap: 20px; }
-    .stTabs [data-baseweb="tab"] { background-color: transparent; color: white; border: none; }
-    .glass-card { background: rgba(255, 255, 255, 0.05); border-radius: 20px; padding: 25px; border: 1px solid rgba(255,255,255,0.1); }
+    /* Dark Gradient Background */
+    .main { 
+        background: radial-gradient(circle at top right, #2b2b4b, #000000); 
+        color: white; 
+    }
+
+    /* Glass Tile Styling */
+    .glass-tile {
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 30px;
+        padding: 50px 20px;
+        text-align: center;
+        transition: all 0.4s ease-in-out;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+    
+    .glass-tile:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        transform: translateY(-10px);
+        box-shadow: 0 12px 40px 0 rgba(88, 101, 242, 0.2);
+    }
+
+    /* Icon Styling */
+    .tile-icon {
+        font-size: 50px;
+        margin-bottom: 15px;
+        display: block;
+    }
+
+    .tile-text {
+        font-family: 'SF Pro Display', -apple-system, sans-serif;
+        font-weight: 200;
+        letter-spacing: 1px;
+        color: #ffffff;
+    }
 </style>
 """, unsafe_allow_html=True)
 
+# --- SESSION STATE ---
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "user_name" not in st.session_state: st.session_state.user_name = ""
 if "view" not in st.session_state: st.session_state.view = "home"
 
-# --- LOGIN FLOW ---
+# --- LOGIN (Simplified for focus on Splash) ---
 if not st.session_state.logged_in:
-    st.markdown("<h1 style='text-align: center; letter-spacing: 5px;'>GSA SECURE ACCESS</h1>", unsafe_allow_html=True)
-    
-    _, col_mid, _ = st.columns([1, 2, 1])
-    with col_mid:
-        tab1, tab2 = st.tabs(["[ UNLOCK ]", "[ INITIALIZE ]"])
-        
-        with tab2:
-            u = st.text_input("One-Word Username")
-            e = st.text_input("Email")
-            p = st.text_input("Password", type="password")
-            if st.button("CREATE IDENTITY"):
-                if u and e and p:
-                    try:
-                        c.execute("INSERT INTO users VALUES (?,?,?)", (e, p, u))
-                        conn.commit()
-                        st.success(f"System Initialized for {u}. Proceed to Login.")
-                    except: st.error("Identity already exists in database.")
-        
-        with tab1:
-            le = st.text_input("Email", key="login_e")
-            lp = st.text_input("Password", type="password", key="login_p")
-            if st.button("UNLOCK DASHBOARD"):
-                # Case-insensitive check to be safe
-                c.execute("SELECT username FROM users WHERE LOWER(email)=LOWER(?) AND password=?", (le, lp))
-                res = c.fetchone()
-                if res:
-                    st.session_state.logged_in = True
-                    st.session_state.user_name = res[0]
-                    st.rerun()
-                else:
-                    st.error("ACCESS DENIED: Credentials not found.")
-
-    # --- DEBUG SECTION (REMOVE LATER) ---
-    st.write("---")
-    with st.expander("🛠 SYSTEM DEBUG (Verify Accounts)"):
-        c.execute("SELECT username, email FROM users")
-        accounts = c.fetchall()
-        if accounts:
-            st.write("Active Accounts in Database:")
-            for acc in accounts:
-                st.code(f"User: {acc[0]} | Email: {acc[1]}")
-        else:
-            st.warning("DATABASE EMPTY: Please use the 'Initialize' tab first.")
+    # ... (Keep your current login logic here)
+    st.title("GSA SECURE ACCESS")
+    # For testing, let's bypass if you're struggling to log in
+    if st.button("DEBUG: BYPASS TO SPLASH"):
+        st.session_state.logged_in = True
+        st.session_state.user_name = "Admin"
+        st.rerun()
     st.stop()
 
-# --- APP VIEW ---
-st.sidebar.markdown(f"### ⚡ ACTIVE: {st.session_state.user_name}")
-if st.sidebar.button("LOGOUT"):
-    st.session_state.logged_in = False
-    st.rerun()
-
-# Splash Screen
+# --- THE CHIC SPLASH SCREEN ---
 if st.session_state.view == "home":
-    st.markdown(f"<h1 style='text-align:center;'>Welcome Back, {st.session_state.user_name}</h1>", unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("<div class='glass-card'><h2>🔳</h2><h3>Task Initiation</h3></div>", unsafe_allow_html=True)
-        if st.button("Launch"): st.toast("Coming soon!")
-    with c2:
-        st.markdown("<div class='glass-card'><h2>⚙️</h2><h3>Account Panel</h3></div>", unsafe_allow_html=True)
-        if st.button("Manage"): st.toast("Identity settings online.")
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align: center; font-weight: 100; font-size: 50px;'>Welcome, {st.session_state.user_name}</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; opacity: 0.5;'>System Status: Online</p>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2, gap="large")
+
+    with col1:
+        st.markdown("""
+            <div class='glass-tile'>
+                <span class='tile-icon'>⊕</span>
+                <h2 class='tile-text'>NEW TASK</h2>
+            </div>
+        """, unsafe_allow_html=True)
+        if st.button("Launch Pipeline", key="btn_new", use_container_width=True):
+            st.session_state.view = "create_project"
+            st.rerun()
+
+    with col2:
+        st.markdown("""
+            <div class='glass-tile'>
+                <span class='tile-icon'>▤</span>
+                <h2 class='tile-text'>ARCHIVE</h2>
+            </div>
+        """, unsafe_allow_html=True)
+        if st.button("Browse Vault", key="btn_view", use_container_width=True):
+            st.toast("Select a project from the sidebar to begin.")
+
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    if st.button("Logout", type="secondary"):
+        st.session_state.logged_in = False
+        st.rerun()
