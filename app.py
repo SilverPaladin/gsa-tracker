@@ -4,6 +4,9 @@ import pandas as pd
 from datetime import datetime
 import json
 import os
+import re
+import requests
+from bs4 import BeautifulSoup
 
 # --- CONFIG ---
 st.set_page_config(page_title="Arma Staff Portal", layout="wide")
@@ -22,7 +25,8 @@ def load_db():
             "mods": [],
             "events": [],
             "tutorials": [],
-            "announcements": []
+            "announcements": [],
+            "mod_library": [] # New storage for Mod JSONs
         }
         with open(DB_FILE, 'w') as f:
             json.dump(default_data, f)
@@ -31,8 +35,9 @@ def load_db():
     try:
         with open(DB_FILE, 'r') as f:
             data = json.load(f)
-            if "usernames" not in data:
-                data["usernames"] = {}
+            # Migration checks
+            if "usernames" not in data: data["usernames"] = {}
+            if "mod_library" not in data: data["mod_library"] = []
             return data
     except json.JSONDecodeError:
         return {} 
@@ -43,6 +48,49 @@ def save_db(data):
 
 DB = load_db()
 
+# --- HELPER: WORKSHOP SCRAPER ---
+def fetch_mod_details(mod_input):
+    """
+    Attempts to fetch Mod Name/Version from Arma Reforger Workshop.
+    Input can be a URL or just an ID.
+    """
+    # Extract ID from URL if full link provided
+    mod_id = mod_input.strip()
+    if "reforger.armaplatform.com/workshop/" in mod_id:
+        # Extract ID from URL (e.g., .../workshop/59673B6FBB95459F-BetterTracers)
+        try:
+            mod_id = mod_id.split("workshop/")[1].split("-")[0]
+        except:
+            return None, None, "Invalid URL format"
+    
+    url = f"https://reforger.armaplatform.com/workshop/{mod_id}"
+    
+    try:
+        # Fake user agent to avoid immediate blocking
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        response = requests.get(url, headers=headers, timeout=5)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 1. Try to find Title
+            # Reforger workshop structure changes, but usually title is in an H1 or OG tag
+            title = soup.find("meta", property="og:title")
+            mod_name = title["content"] if title else "Unknown Mod"
+            
+            # 2. Try to find Version
+            # This is harder to scrape without rendering JS, so we default to "1.0.0" if not found
+            # Sometimes it's in a specific div class. We'll try a generic search.
+            mod_version = "1.0.0" 
+            # Advanced scraping would go here, but static scraping is limited on React sites.
+            
+            return mod_id, mod_name, mod_version
+        else:
+            return mod_id, None, f"Failed to reach Workshop (Status {response.status_code})"
+            
+    except Exception as e:
+        return mod_id, None, str(e)
+
 # --- LOCAL SESSION STATE ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -52,6 +100,9 @@ if "page" not in st.session_state:
     st.session_state.page = "view_announcements"
 if "selected_mod_id" not in st.session_state:
     st.session_state.selected_mod_id = None
+# Editor State
+if "editor_content" not in st.session_state:
+    st.session_state.editor_content = "[\n\n]"
 
 # --- CSS ---
 st.markdown("""
@@ -78,7 +129,6 @@ if not st.session_state.logged_in:
     col_center = st.columns([1, 2, 1])
     with col_center[1]:
         login_tab, signup_tab = st.tabs(["🔑 Login", "📝 Create Account"])
-        
         with login_tab:
             with st.container(border=True):
                 email = st.text_input("Email", key="log_email")
@@ -89,29 +139,23 @@ if not st.session_state.logged_in:
                         st.session_state.current_user = email
                         st.success("Success!")
                         st.rerun()
-                    else:
-                        st.error("Invalid credentials.")
-
+                    else: st.error("Invalid credentials.")
         with signup_tab:
             with st.container(border=True):
                 new_user = st.text_input("Username", key="sign_user")
                 new_email = st.text_input("New Email", key="sign_email")
                 new_pass = st.text_input("New Password", type="password", key="sign_pwd")
                 conf_pass = st.text_input("Confirm Password", type="password", key="sign_conf")
-                
                 if st.button("Create Account", type="primary", use_container_width=True):
-                    if new_email in DB['role_db']:
-                        st.error("Account exists.")
-                    elif new_pass != conf_pass:
-                        st.error("Passwords mismatch.")
+                    if new_email in DB['role_db']: st.error("Account exists.")
+                    elif new_pass != conf_pass: st.error("Passwords mismatch.")
                     elif new_email and new_pass and new_user:
                         DB['role_db'][new_email] = "staff"
                         DB['passwords'][new_email] = new_pass
                         DB['usernames'][new_email] = new_user
                         save_db(DB) 
-                        st.success("Account created! Please login.")
-                    else:
-                        st.warning("All fields are required.")
+                        st.success("Created! Login now.")
+                    else: st.warning("All fields required.")
     st.stop()
 
 # =========================================================
@@ -137,48 +181,33 @@ if st.sidebar.button("🚪 Logout"):
     st.rerun()
 st.sidebar.divider()
 
-# GLOBAL
 st.sidebar.button("📢 Announcements", on_click=navigate_to, args=("view_announcements",))
 
-# ADMIN TOOLS
 if user_role in ["admin", "SUPER_ADMIN"]:
     st.sidebar.subheader("Server Admin")
     st.sidebar.button(f"{get_mod_status()} Report Broken Mod", on_click=navigate_to, args=("report_broken_mod", None))
 
-# CLP TOOLS
 if user_role in ["CLPLEAD", "SUPER_ADMIN", "CLP"]:
     st.sidebar.subheader("CLP Management")
     if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
         st.sidebar.button("📅 Create Event", on_click=navigate_to, args=("create_event",))
         st.sidebar.button("📚 Create Tutorial", on_click=navigate_to, args=("create_tutorial",))
 
-# SUPER ADMIN
 if user_role == "SUPER_ADMIN":
     st.sidebar.divider()
     st.sidebar.button("🔑 Assign Roles", on_click=navigate_to, args=("roles",))
+    st.sidebar.button("📝 JSON Editor", on_click=navigate_to, args=("json_editor",))
 
-# --- DYNAMIC TOP NAV ---
-# Logic: Staff sees NOTHING. Admins see EVERYTHING. CLP sees LIMITED.
+# --- TOP NAV ---
 if user_role != "staff":
     menu_items = []
-    
-    # 1. Admin Only Items
     if user_role in ["admin", "SUPER_ADMIN"]:
-        menu_items.append({"label": "Broken Mods", "page": "view_broken_mods"})
-        menu_items.append({"label": "Fixed", "page": "view_fixed_mods"})
-    
-    # 2. Common Items (CLP, CLPLEAD, Admin, Super Admin)
-    menu_items.append({"label": "Tutorials", "page": "view_tutorials"})
-    menu_items.append({"label": "Training Schedules", "page": "view_events"})
-    menu_items.append({"label": "Events", "page": "view_events"})
-    menu_items.append({"label": "Users", "page": "view_users"})
-
-    # Render the Menu
+        menu_items += [{"label": "Broken Mods", "page": "view_broken_mods"}, {"label": "Fixed", "page": "view_fixed_mods"}]
+    menu_items += [{"label": "Tutorials", "page": "view_tutorials"}, {"label": "Training Schedules", "page": "view_events"}, 
+                   {"label": "Events", "page": "view_events"}, {"label": "Users", "page": "view_users"}]
     cols = st.columns(len(menu_items))
     for i, item in enumerate(menu_items):
-        with cols[i]:
-            st.button(item["label"], use_container_width=True, on_click=navigate_to, args=(item["page"],))
-    
+        with cols[i]: st.button(item["label"], use_container_width=True, on_click=navigate_to, args=(item["page"],))
     st.markdown("---")
 
 # --- PAGES ---
@@ -190,14 +219,10 @@ if st.session_state.page == "view_announcements":
             title = st.text_input("Title")
             content = st_quill(key="ann_quill")
             if st.button("Post"):
-                DB['announcements'].insert(0, {
-                    "date": datetime.now().strftime("%Y-%m-%d"),
-                    "title": title, "content": content, "author": USER_NAME
-                })
+                DB['announcements'].insert(0, {"date": datetime.now().strftime("%Y-%m-%d"), "title": title, "content": content, "author": USER_NAME})
                 save_db(DB)
                 st.success("Posted!")
                 st.rerun()
-    
     if not DB['announcements']: st.info("No announcements.")
     for a in DB['announcements']:
         with st.container(border=True):
@@ -214,20 +239,14 @@ elif st.session_state.page == "report_broken_mod":
     st.write("Description:")
     desc = st_quill(key="mod_desc", html=True)
     if st.button("Submit Report"):
-        DB['mods'].append({
-            "id": len(DB['mods']), "name": name, "json_data": json_code,
-            "severity": sev, "assignment": assign, "description": desc,
-            "complete": False, "discussion": []
-        })
+        DB['mods'].append({"id": len(DB['mods']), "name": name, "json_data": json_code, "severity": sev, "assignment": assign, "description": desc, "complete": False, "discussion": []})
         save_db(DB)
         st.success("Submitted!")
         st.session_state.page = "view_broken_mods"
         st.rerun()
 
 elif st.session_state.page == "view_broken_mods":
-    # DOUBLE CHECK ACCESS (Security Layer)
-    if user_role not in ["admin", "SUPER_ADMIN"]:
-        st.error("Access Denied.")
+    if user_role not in ["admin", "SUPER_ADMIN"]: st.error("Access Denied.")
     else:
         st.title("Active Broken Mods")
         active = [m for m in DB['mods'] if not m['complete']]
@@ -241,9 +260,7 @@ elif st.session_state.page == "view_broken_mods":
                 with c2: st.button("Details", key=f"d_{m['id']}", on_click=navigate_to, args=("mod_detail", m['id']))
 
 elif st.session_state.page == "view_fixed_mods":
-    # DOUBLE CHECK ACCESS
-    if user_role not in ["admin", "SUPER_ADMIN"]:
-        st.error("Access Denied.")
+    if user_role not in ["admin", "SUPER_ADMIN"]: st.error("Access Denied.")
     else:
         st.title("Fixed Mods Archive")
         fixed = [m for m in DB['mods'] if m['complete']]
@@ -264,7 +281,6 @@ elif st.session_state.page == "mod_detail":
             if m.get('json_data'): st.code(m['json_data'], language='json')
             st.markdown(m['description'], unsafe_allow_html=True)
             st.divider()
-            # Only Admins can Resolve
             if user_role in ["admin", "SUPER_ADMIN"]:
                 if not m['complete']:
                     if st.button("✅ Mark Resolved", type="primary"):
@@ -279,9 +295,6 @@ elif st.session_state.page == "mod_detail":
                         m['complete'] = False
                         save_db(DB)
                         st.rerun()
-            elif m['complete']:
-                st.success("This issue is Resolved.")
-                
         with c2:
             st.subheader("Discussion")
             chat = st.container(height=400, border=True)
@@ -291,9 +304,7 @@ elif st.session_state.page == "mod_detail":
             with st.form("chat"):
                 txt = st.text_input("Message")
                 if st.form_submit_button("Send") and txt:
-                    m.setdefault('discussion', []).append({
-                        "user": USER_NAME, "text": txt, "time": str(datetime.now())
-                    })
+                    m.setdefault('discussion', []).append({"user": USER_NAME, "text": txt, "time": str(datetime.now())})
                     save_db(DB)
                     st.rerun()
 
@@ -306,10 +317,7 @@ elif st.session_state.page == "create_event":
     loc = st.text_input("Location")
     desc = st_quill(key="ev_desc")
     if st.button("Publish"):
-        DB['events'].append({
-            "name": name, "date": str(date), "time": str(time),
-            "tz": tz, "loc": loc, "desc": desc
-        })
+        DB['events'].append({"name": name, "date": str(date), "time": str(time), "tz": tz, "loc": loc, "desc": desc})
         save_db(DB)
         st.success("Published!")
         st.session_state.page = "view_events"
@@ -352,15 +360,12 @@ elif st.session_state.page == "view_users":
             with c1: st.write("👤")
             with c2: 
                 st.subheader(u_name)
-                if user_role == "SUPER_ADMIN":
-                    st.caption(f"Email: {email}")
+                if user_role == "SUPER_ADMIN": st.caption(f"Email: {email}")
                 st.caption(f"Role: {role}")
-            with c3:
-                st.write("🟢 Online" if email == USER_EMAIL else "⚪ Offline")
+            with c3: st.write("🟢 Online" if email == USER_EMAIL else "⚪ Offline")
 
 elif st.session_state.page == "roles":
     st.title("Role Management")
-    
     with st.container(border=True):
         st.subheader("Update User Role")
         u_email = st.text_input("User Email to Update")
@@ -370,11 +375,9 @@ elif st.session_state.page == "roles":
                 DB['role_db'][u_email] = u_role
                 save_db(DB)
                 st.success("Updated!")
-            else:
-                st.error("User not found.")
-
+            else: st.error("User not found.")
     with st.expander("❌ Delete User (Danger Zone)"):
-        st.warning("This action cannot be undone.")
+        st.warning("Cannot be undone.")
         del_email = st.text_input("Enter Email to Delete")
         if st.button("Permanently Delete User", type="primary"):
             if del_email in DB['role_db']:
@@ -383,7 +386,132 @@ elif st.session_state.page == "roles":
                 if del_email in DB['usernames']: del DB['usernames'][del_email]
                 save_db(DB)
                 st.success(f"User {del_email} deleted.")
-            else:
-                st.error("User not found.")
-    
+            else: st.error("User not found.")
     st.table(pd.DataFrame(DB['role_db'].items(), columns=["Email", "Role"]))
+
+# --- NEW: JSON EDITOR / MOD MANAGER PAGE ---
+elif st.session_state.page == "json_editor":
+    st.title("📝 Mod Configuration Studio")
+    if user_role != "SUPER_ADMIN":
+        st.error("Access Denied.")
+    else:
+        # Layout: Left = Editor, Right = Library
+        col_editor, col_library = st.columns([2, 1])
+        
+        with col_editor:
+            st.subheader("Config Editor")
+            st.caption("Construct your server 'mods' array here.")
+            # Text area connected to session state to persist changes during clicks
+            json_text = st.text_area("JSON Output", value=st.session_state.editor_content, height=600, key="main_json_editor")
+            # Update session state manually if user types in box
+            st.session_state.editor_content = json_text
+            
+            if st.button("📋 Copy to Clipboard (Manual)", help="Ctrl+A, Ctrl+C"):
+                st.info("Select all text above and copy it.")
+
+        with col_library:
+            st.subheader("📦 Mod Library")
+            
+            tab_lib, tab_import = st.tabs(["Saved Mods", "Import/Fetch"])
+            
+            # --- TAB: SAVED MODS ---
+            with tab_lib:
+                if not DB['mod_library']:
+                    st.info("Library is empty.")
+                else:
+                    for idx, mod in enumerate(DB['mod_library']):
+                        with st.container(border=True):
+                            st.write(f"**{mod.get('name', 'Unknown')}**")
+                            st.caption(f"ID: {mod.get('modId')} | v{mod.get('version')}")
+                            
+                            c_add, c_del = st.columns([3, 1])
+                            with c_add:
+                                if st.button("➕ Add", key=f"add_mod_{idx}"):
+                                    # Logic to insert into editor
+                                    # We parse current editor content to list, append, dump back
+                                    try:
+                                        # Clean up current content to ensure it's a list
+                                        current_str = st.session_state.editor_content.strip()
+                                        if not current_str: current_str = "[]"
+                                        
+                                        # Basic heuristic: If it ends with ']', remove ']', add comma, add obj, add ']'
+                                        # Or better: Try to load as json, append, dump
+                                        # Note: This is a simple append logic
+                                        new_snippet = json.dumps(mod, indent=4)
+                                        
+                                        if current_str.endswith("]"):
+                                            # It's a list. Insert before last bracket
+                                            if len(current_str) > 2: # Not empty list
+                                                updated_str = current_str[:-1] + ",\n" + new_snippet + "\n]"
+                                            else: # Empty list []
+                                                updated_str = "[\n" + new_snippet + "\n]"
+                                        else:
+                                            # Just append it
+                                            updated_str = current_str + ",\n" + new_snippet
+                                            
+                                        st.session_state.editor_content = updated_str
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Error appending: {e}")
+                            
+                            with c_del:
+                                if st.button("🗑️", key=f"del_mod_{idx}"):
+                                    DB['mod_library'].pop(idx)
+                                    save_db(DB)
+                                    st.rerun()
+
+            # --- TAB: IMPORT / FETCH ---
+            with tab_import:
+                st.write("**Method 1: Fetch from Workshop**")
+                search_input = st.text_input("Workshop ID or URL", placeholder="59673B6FBB95459F")
+                if st.button("🔍 Fetch & Save"):
+                    if search_input:
+                        mid, mname, mver = fetch_mod_details(search_input)
+                        if mname:
+                            new_mod = {"modId": mid, "name": mname, "version": mver}
+                            DB['mod_library'].append(new_mod)
+                            save_db(DB)
+                            st.success(f"Saved: {mname}")
+                        else:
+                            st.error(f"Error: {mver}")
+                            # Fallback form
+                            st.warning("Could not scrape. Enter manually below.")
+                
+                with st.expander("Manual Entry / Fallback"):
+                    m_id = st.text_input("Mod ID")
+                    m_name = st.text_input("Mod Name")
+                    m_ver = st.text_input("Version", value="1.0.0")
+                    if st.button("Save Manual Entry"):
+                        if m_id and m_name:
+                            DB['mod_library'].append({"modId": m_id, "name": m_name, "version": m_ver})
+                            save_db(DB)
+                            st.success("Saved!")
+                            st.rerun()
+                
+                st.divider()
+                st.write("**Method 2: Batch Paste**")
+                batch_text = st.text_area("Paste existing JSON blob here", height=150)
+                if st.button("Process Batch"):
+                    # Regex to find JSON objects with modId
+                    try:
+                        # Find all blocks that look like {"modId": ...}
+                        # This regex is loose to allow for messy input
+                        matches = re.findall(r'\{[^{}]*"modId"[^{}]*\}', batch_text, re.DOTALL)
+                        count = 0
+                        for match in matches:
+                            try:
+                                # Try to parse each match
+                                mod_obj = json.loads(match)
+                                if "modId" in mod_obj:
+                                    DB['mod_library'].append(mod_obj)
+                                    count += 1
+                            except: pass
+                        
+                        if count > 0:
+                            save_db(DB)
+                            st.success(f"Imported {count} mods!")
+                            st.rerun()
+                        else:
+                            st.warning("No valid mod objects found.")
+                    except Exception as e:
+                        st.error(str(e))
