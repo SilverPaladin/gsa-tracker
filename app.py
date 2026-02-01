@@ -7,7 +7,6 @@ from datetime import datetime
 st.set_page_config(page_title="Arma Staff Portal", layout="wide")
 
 # --- SECURITY CONFIGURATION ---
-# AUTOMATICALLY GENERATED PASSWORD
 SYSTEM_PASSWORD = "001Arma!23" 
 
 # --- INITIALIZE STATE ---
@@ -16,7 +15,6 @@ if "role_db" not in st.session_state:
         "armasupplyguy@gmail.com": "SUPER_ADMIN"
     }
 
-# We need a separate DB for passwords now that users can create accounts
 if "user_passwords" not in st.session_state:
     st.session_state.user_passwords = {
         "armasupplyguy@gmail.com": SYSTEM_PASSWORD
@@ -30,6 +28,10 @@ if "events" not in st.session_state:
 
 if "tutorials" not in st.session_state:
     st.session_state.tutorials = []
+
+# NEW: Announcements Database
+if "announcements" not in st.session_state:
+    st.session_state.announcements = []
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -87,9 +89,7 @@ if not st.session_state.logged_in:
                 password_input = st.text_input("Password", type="password", key="login_pass")
                 
                 if st.button("Login", type="primary", use_container_width=True):
-                    # 1. Check if user exists
                     if email_input in st.session_state.role_db:
-                        # 2. Verify Password
                         stored_pass = st.session_state.user_passwords.get(email_input)
                         if stored_pass == password_input:
                             st.session_state.logged_in = True
@@ -115,8 +115,8 @@ if not st.session_state.logged_in:
                         elif new_pass != confirm_pass:
                             st.error("Passwords do not match.")
                         else:
-                            # Create User with Default Role "CLP"
-                            st.session_state.role_db[new_email] = "CLP"
+                            # CHANGE: Default role is now 'staff'
+                            st.session_state.role_db[new_email] = "staff"
                             st.session_state.user_passwords[new_email] = new_pass
                             st.success("Account created successfully! You can now login.")
                     else:
@@ -129,10 +129,10 @@ if not st.session_state.logged_in:
 # =========================================================
 
 USER_EMAIL = st.session_state.current_user
-user_role = st.session_state.role_db.get(USER_EMAIL, "CLP")
+user_role = st.session_state.role_db.get(USER_EMAIL, "staff")
 
 if "page" not in st.session_state:
-    st.session_state.page = "report_broken_mod"
+    st.session_state.page = "view_announcements" # Default page for everyone now
 
 if "selected_mod_id" not in st.session_state:
     st.session_state.selected_mod_id = None
@@ -160,6 +160,9 @@ if st.sidebar.button("🚪 Logout"):
 
 st.sidebar.divider()
 
+# --- NEW: ANNOUNCEMENTS TAB (Visible to Everyone) ---
+st.sidebar.button("📢 Announcements", on_click=navigate_to, args=("view_announcements",))
+
 # Category: Server Admin
 if user_role in ["admin", "SUPER_ADMIN"]:
     st.sidebar.subheader("Server Admin")
@@ -171,8 +174,8 @@ if user_role in ["admin", "SUPER_ADMIN"]:
     )
 
 # Category: CLP Management
-st.sidebar.subheader("CLP Management")
 if user_role in ["CLPLEAD", "SUPER_ADMIN", "CLP"]:
+    st.sidebar.subheader("CLP Management")
     if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
         st.sidebar.button("📅 Create Event", on_click=navigate_to, args=("create_event",))
         st.sidebar.button("📚 Create Tutorial", on_click=navigate_to, args=("create_tutorial",))
@@ -183,26 +186,59 @@ if user_role == "SUPER_ADMIN":
     st.sidebar.button("🔑 Assign Roles", on_click=navigate_to, args=("roles",))
 
 
-# --- TOP LEVEL NAVIGATION ---
-nav_col1, nav_col2, nav_col3, nav_col4, nav_col5, nav_col6 = st.columns(6)
+# --- TOP LEVEL NAVIGATION (HIDDEN FOR 'staff') ---
+if user_role != "staff":
+    nav_col1, nav_col2, nav_col3, nav_col4, nav_col5, nav_col6 = st.columns(6)
 
-with nav_col1:
-    st.button("Broken Mods", use_container_width=True, on_click=navigate_to, args=("view_broken_mods",))
-with nav_col2:
-    st.button("Fixed", use_container_width=True, on_click=navigate_to, args=("view_fixed_mods",))
-with nav_col3:
-    st.button("Tutorials", use_container_width=True, on_click=navigate_to, args=("view_tutorials",))
-with nav_col4:
-    st.button("Training Schedules", use_container_width=True, on_click=navigate_to, args=("view_events",))
-with nav_col5:
-    st.button("Events", use_container_width=True, on_click=navigate_to, args=("view_events",))
-with nav_col6:
-    st.button("Users", use_container_width=True, on_click=navigate_to, args=("view_users",))
+    with nav_col1:
+        st.button("Broken Mods", use_container_width=True, on_click=navigate_to, args=("view_broken_mods",))
+    with nav_col2:
+        st.button("Fixed", use_container_width=True, on_click=navigate_to, args=("view_fixed_mods",))
+    with nav_col3:
+        st.button("Tutorials", use_container_width=True, on_click=navigate_to, args=("view_tutorials",))
+    with nav_col4:
+        st.button("Training Schedules", use_container_width=True, on_click=navigate_to, args=("view_events",))
+    with nav_col5:
+        st.button("Events", use_container_width=True, on_click=navigate_to, args=("view_events",))
+    with nav_col6:
+        st.button("Users", use_container_width=True, on_click=navigate_to, args=("view_users",))
 
-st.markdown("---") 
+    st.markdown("---") 
+
+# --- PAGE: ANNOUNCEMENTS (NEW) ---
+if st.session_state.page == "view_announcements":
+    st.title("📢 Announcements")
+    
+    # Posting Form: ONLY SUPER ADMIN
+    if user_role == "SUPER_ADMIN":
+        with st.expander("Create New Announcement"):
+            with st.form("announcement_form"):
+                a_title = st.text_input("Title")
+                a_content = st_quill(key="announcement_quill", placeholder="Write your announcement here...")
+                submitted = st.form_submit_button("Post Announcement")
+                
+                if submitted and a_title:
+                    st.session_state.announcements.insert(0, {
+                        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "title": a_title,
+                        "content": a_content,
+                        "author": USER_EMAIL
+                    })
+                    st.success("Posted!")
+                    st.rerun()
+
+    # View Logic: EVERYONE
+    if not st.session_state.announcements:
+        st.info("No announcements posted yet.")
+    else:
+        for ann in st.session_state.announcements:
+            with st.container(border=True):
+                st.subheader(ann['title'])
+                st.caption(f"Posted by {ann['author']} on {ann['date']}")
+                st.markdown(ann['content'], unsafe_allow_html=True)
 
 # --- PAGE: REPORT BROKEN MOD ---
-if st.session_state.page == "report_broken_mod":
+elif st.session_state.page == "report_broken_mod":
     st.title("Report Broken Mod")
     with st.container(border=True):
         st.subheader("Create New Report")
@@ -359,38 +395,4 @@ elif st.session_state.page == "create_tutorial":
         st.error("You do not have permission to create tutorials.")
 
 # --- PAGE: VIEW TUTORIALS ---
-elif st.session_state.page == "view_tutorials":
-    st.title("Tutorials Library")
-    if not st.session_state.tutorials:
-        st.info("No tutorials available.")
-    for tut in st.session_state.tutorials:
-        with st.container(border=True):
-            st.subheader(tut['title'])
-            st.markdown(tut['content'], unsafe_allow_html=True)
-
-# --- PAGE: VIEW USERS ---
-elif st.session_state.page == "view_users":
-    st.title("Staff Roster & Online Status")
-    for email, role in st.session_state.role_db.items():
-        with st.container(border=True):
-            col_avatar, col_info, col_status = st.columns([1, 4, 2])
-            with col_avatar:
-                st.write("👤") 
-            with col_info:
-                st.subheader(email)
-                st.caption(f"Role: {role}")
-            with col_status:
-                if email == USER_EMAIL:
-                    st.success("🟢 Online")
-                else:
-                    st.write("⚪ Offline")
-
-# --- PAGE: ROLE MANAGEMENT ---
-elif st.session_state.page == "roles":
-    st.title("Super Admin: Role Management")
-    new_email = st.text_input("User Email")
-    new_role = st.selectbox("Assign Role", ["admin", "CLPLEAD", "CLP"])
-    if st.button("Update Role"):
-        st.session_state.role_db[new_email] = new_role
-        st.success(f"Updated {new_email} to {new_role}")
-    st.table(pd.DataFrame(st.session_state.role_db.items(), columns=["Email", "Role"]))
+elif st.session_state.
