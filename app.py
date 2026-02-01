@@ -9,6 +9,7 @@ st.set_page_config(page_title="Arma Staff Portal", layout="wide")
 # Mock User Login
 USER_EMAIL = "armasupplyguy@gmail.com"
 
+# --- INITIALIZE STATE ---
 if "role_db" not in st.session_state:
     st.session_state.role_db = {
         "armasupplyguy@gmail.com": "SUPER_ADMIN",
@@ -17,7 +18,6 @@ if "role_db" not in st.session_state:
         "player1@gmail.com": "CLP"
     }
 
-# Initialize Mods
 if "mods" not in st.session_state:
     st.session_state.mods = []
 
@@ -33,7 +33,19 @@ if "page" not in st.session_state:
 if "selected_mod_id" not in st.session_state:
     st.session_state.selected_mod_id = None
 
+# --- SAFETY CHECK: AUTO-FIX MISSING DATA ---
+# This runs on every reload to ensure no "KeyError" ever happens again.
+for mod in st.session_state.mods:
+    if "discussion" not in mod:
+        mod["discussion"] = []
+
 user_role = st.session_state.role_db.get(USER_EMAIL, "CLP")
+
+# --- NAVIGATION CALLBACK FUNCTION ---
+# This fixes the "Button does nothing" issue by forcing the state update immediately.
+def navigate_to(page_name, mod_id=None):
+    st.session_state.page = page_name
+    st.session_state.selected_mod_id = mod_id
 
 # --- AGGRESSIVE DARK MODE CSS ---
 st.markdown("""
@@ -64,11 +76,12 @@ if user_role in ["admin", "SUPER_ADMIN"]:
     st.sidebar.subheader("Server Admin")
     mod_light = get_mod_status()
     
-    # Main Button: Report Broken Mod
-    if st.sidebar.button(f"{mod_light} Report Broken Mod"):
-        st.session_state.page = "report_broken_mod"
-        st.session_state.selected_mod_id = None
-        st.rerun()
+    # Main Button: Report Broken Mod (Using Callback)
+    st.sidebar.button(
+        f"{mod_light} Report Broken Mod", 
+        on_click=navigate_to, 
+        args=("report_broken_mod", None)
+    )
 
     # Sub-Menu: List Active Broken Mods
     st.sidebar.markdown("---")
@@ -79,31 +92,29 @@ if user_role in ["admin", "SUPER_ADMIN"]:
         st.sidebar.info("No active issues.")
     
     for mod in active_mods:
-        # Clicking this sets the page to 'mod_detail' and selects the ID
-        if st.sidebar.button(f"🔸 {mod['name']}", key=f"sidebar_link_{mod['id']}"):
-            st.session_state.page = "mod_detail"
-            st.session_state.selected_mod_id = mod['id']
-            st.rerun()
+        # Link to specific mod (Using Callback)
+        st.sidebar.button(
+            f"🔸 {mod['name']}", 
+            key=f"sidebar_link_{mod['id']}",
+            on_click=navigate_to,
+            args=("mod_detail", mod['id'])
+        )
 
 # Category: CLP Management
 st.sidebar.subheader("CLP Management")
 if user_role in ["CLPLEAD", "SUPER_ADMIN", "CLP"]:
-    if st.sidebar.button("📅 Events"):
-        st.session_state.page = "events"
-    if st.sidebar.button("📚 Tutorials"):
-        st.session_state.page = "tutorials"
+    st.sidebar.button("📅 Events", on_click=navigate_to, args=("events",))
+    st.sidebar.button("📚 Tutorials", on_click=navigate_to, args=("tutorials",))
 
 # Super Admin Only
 if user_role == "SUPER_ADMIN":
     st.sidebar.divider()
-    if st.sidebar.button("🔑 Assign Roles"):
-        st.session_state.page = "roles"
+    st.sidebar.button("🔑 Assign Roles", on_click=navigate_to, args=("roles",))
 
 # --- PAGE: REPORT BROKEN MOD (LANDING) ---
-elif st.session_state.page == "report_broken_mod":
+if st.session_state.page == "report_broken_mod":
     st.title("Report Broken Mod")
     
-    # Creation Form
     with st.container(border=True):
         st.subheader("Create New Report")
         name = st.text_input("Mod Name")
@@ -123,7 +134,7 @@ elif st.session_state.page == "report_broken_mod":
                 "assignment": assignment,
                 "description": desc, 
                 "complete": False,
-                "discussion": [] # Initialize empty chat list
+                "discussion": [] 
             })
             st.success("Report Submitted!")
             st.rerun()
@@ -136,11 +147,6 @@ elif st.session_state.page == "mod_detail":
     if current_mod:
         st.title(f"Issue: {current_mod['name']}")
         
-        # --- FIX: Ensure 'discussion' key exists to prevent crash ---
-        if 'discussion' not in current_mod:
-            current_mod['discussion'] = []
-        
-        # Split layout: Report on Left (2), Chat on Right (1)
         col_report, col_chat = st.columns([2, 1])
         
         # LEFT COLUMN: THE REPORT
@@ -165,15 +171,12 @@ elif st.session_state.page == "mod_detail":
         with col_chat:
             st.subheader("💬 Discussion")
             
-            # Chat History Display
             chat_container = st.container(height=400, border=True)
-            # Safe loop using .get() just in case
-            for msg in current_mod.get('discussion', []):
+            for msg in current_mod['discussion']:
                 chat_container.markdown(f"**{msg['user']}**: {msg['text']}")
                 chat_container.caption(f"{msg['time']}")
                 chat_container.divider()
             
-            # Chat Input
             with st.form(key="chat_form", clear_on_submit=True):
                 user_msg = st.text_input("Type a message...")
                 submit_chat = st.form_submit_button("Send")
