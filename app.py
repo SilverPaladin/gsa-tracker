@@ -23,6 +23,7 @@ def load_db():
             "usernames": {"armasupplyguy@gmail.com": "ArmaSupplyGuy"},
             "passwords": {"armasupplyguy@gmail.com": SYSTEM_PASSWORD},
             "mods": [],
+            "projects": [], # NEW: Projects Storage
             "events": [],
             "tutorials": [],
             "announcements": [],
@@ -35,9 +36,16 @@ def load_db():
     try:
         with open(DB_FILE, 'r') as f:
             data = json.load(f)
+            # Migrations
             if "usernames" not in data: data["usernames"] = {}
             if "mod_library" not in data: data["mod_library"] = []
             if "server_configs" not in data: data["server_configs"] = []
+            if "projects" not in data: data["projects"] = []
+            
+            # Backfill 'read' status for old data
+            for m in data.get("mods", []):
+                if "read" not in m: m["read"] = True
+            
             return data
     except json.JSONDecodeError: return {} 
 
@@ -79,14 +87,17 @@ if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "current_user" not in st.session_state: st.session_state.current_user = None
 if "page" not in st.session_state: st.session_state.page = "view_announcements"
 if "selected_mod_id" not in st.session_state: st.session_state.selected_mod_id = None
+if "selected_project_id" not in st.session_state: st.session_state.selected_project_id = None
 if "editor_content" not in st.session_state: st.session_state.editor_content = "[\n\n]"
 if "fetched_mod" not in st.session_state: st.session_state.fetched_mod = None
 
-# --- CSS ---
+# --- CSS (Added Flashing Animation) ---
 st.markdown("""
     <style>
         .stMain iframe { filter: invert(1) hue-rotate(180deg); }
         .stMain iframe img { filter: invert(1) hue-rotate(180deg); }
+        
+        /* Sticky Top Nav */
         div[data-testid="stHorizontalBlock"] {
             position: sticky; top: 2.875rem; z-index: 999;
             background-color: #0e1117; padding: 10px 0; border-bottom: 1px solid #333;
@@ -97,6 +108,23 @@ st.markdown("""
         }
         div[data-testid="stHorizontalBlock"] button:hover {
             border-color: #555; color: #4CAF50;
+        }
+
+        /* Flashing Notification */
+        @keyframes flash {
+            0% { background-color: #4a1c1c; border-color: #ff4b4b; }
+            50% { background-color: #0e1117; border-color: #333; }
+            100% { background-color: #4a1c1c; border-color: #ff4b4b; }
+        }
+        .flash-notify {
+            animation: flash 2s infinite;
+            padding: 10px;
+            border: 1px solid #ff4b4b;
+            border-radius: 5px;
+            text-align: center;
+            color: #ff9999;
+            font-weight: bold;
+            margin-bottom: 10px;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -143,9 +171,10 @@ USER_EMAIL = st.session_state.current_user
 USER_NAME = DB['usernames'].get(USER_EMAIL, USER_EMAIL.split('@')[0])
 user_role = DB['role_db'].get(USER_EMAIL, "staff")
 
-def navigate_to(page, mod_id=None):
+def navigate_to(page, mod_id=None, proj_id=None):
     st.session_state.page = page
     st.session_state.selected_mod_id = mod_id
+    st.session_state.selected_project_id = proj_id
 
 def get_mod_status():
     if not DB['mods']: return "🟢"
@@ -154,6 +183,20 @@ def get_mod_status():
 # --- SIDEBAR ---
 st.sidebar.title("🛠 Staff Portal")
 st.sidebar.write(f"User: **{USER_NAME}**")
+
+# --- NOTIFICATION LOGIC ---
+unread_mods = len([m for m in DB['mods'] if not m.get('read', True)])
+unread_projs = len([p for p in DB['projects'] if not p.get('read', True)])
+total_unread = unread_mods + unread_projs
+
+if total_unread > 0 and user_role in ["admin", "SUPER_ADMIN"]:
+    st.sidebar.markdown(f"""
+        <div class="flash-notify">
+            🚨 {total_unread} NEW ITEMS 🚨<br>
+            <span style="font-size:0.8em">Check Broken Mods or New Work</span>
+        </div>
+    """, unsafe_allow_html=True)
+
 if st.sidebar.button("🚪 Logout"):
     st.session_state.logged_in = False
     st.rerun()
@@ -180,7 +223,7 @@ if user_role == "SUPER_ADMIN":
 if user_role != "staff":
     menu_items = []
     if user_role in ["admin", "SUPER_ADMIN"]:
-        menu_items += [{"label": "Broken Mods", "page": "view_broken_mods"}, {"label": "Fixed", "page": "view_fixed_mods"}]
+        menu_items += [{"label": "Broken Mods", "page": "view_broken_mods"}, {"label": "New Work", "page": "view_projects"}, {"label": "Fixed", "page": "view_fixed_mods"}]
     menu_items += [{"label": "Tutorials", "page": "view_tutorials"}, {"label": "Training Schedules", "page": "view_events"}, 
                    {"label": "Events", "page": "view_events"}, {"label": "Users", "page": "view_users"}]
     cols = st.columns(len(menu_items))
@@ -208,21 +251,61 @@ if st.session_state.page == "view_announcements":
             st.caption(f"{a['date']} by {a['author']}")
             st.markdown(a['content'], unsafe_allow_html=True)
 
+# --- REPORT PAGE (MODS & PROJECTS) ---
 elif st.session_state.page == "report_broken_mod":
-    st.title("Report Broken Mod")
-    name = st.text_input("Mod Name")
-    json_code = st.text_area("JSON Code", height=100)
-    sev = st.slider("Severity", 1, 10)
-    assign = st.text_input("Assign To")
-    st.write("Description:")
-    desc = st_quill(key="mod_desc", html=True)
-    if st.button("Submit Report"):
-        DB['mods'].append({"id": len(DB['mods']), "name": name, "json_data": json_code, "severity": sev, "assignment": assign, "description": desc, "complete": False, "discussion": []})
-        save_db(DB)
-        st.success("Submitted!")
-        st.session_state.page = "view_broken_mods"
-        st.rerun()
+    st.title("Submission Center")
+    
+    tab_mod, tab_proj = st.tabs(["⚠️ Report Broken Mod", "✨ New Project"])
+    
+    # TAB 1: MOD REPORT
+    with tab_mod:
+        st.subheader("Report Broken Mod")
+        name = st.text_input("Mod Name")
+        json_code = st.text_area("JSON Code", height=100)
+        sev = st.slider("Severity", 1, 10)
+        assign = st.text_input("Assign To")
+        st.write("Description:")
+        desc = st_quill(key="mod_desc", html=True)
+        if st.button("Submit Report"):
+            DB['mods'].append({
+                "id": len(DB['mods']), 
+                "name": name, 
+                "json_data": json_code, 
+                "severity": sev, 
+                "assignment": assign, 
+                "description": desc, 
+                "complete": False, 
+                "discussion": [],
+                "read": False # Triggers notification
+            })
+            save_db(DB)
+            st.success("Submitted! Notification sent to admins.")
+            st.session_state.page = "view_broken_mods"
+            st.rerun()
 
+    # TAB 2: NEW PROJECT
+    with tab_proj:
+        st.subheader("Start New Project")
+        p_name = st.text_input("Project Title")
+        p_assign = st.text_input("Lead Developer/Assignee")
+        st.write("Project Brief:")
+        p_desc = st_quill(key="proj_desc", html=True)
+        if st.button("Create Project"):
+            DB['projects'].append({
+                "id": len(DB['projects']),
+                "name": p_name,
+                "assigned": p_assign,
+                "description": p_desc,
+                "complete": False,
+                "discussion": [],
+                "read": False # Triggers notification
+            })
+            save_db(DB)
+            st.success("Project Created! Notification sent.")
+            st.session_state.page = "view_projects"
+            st.rerun()
+
+# --- VIEW BROKEN MODS ---
 elif st.session_state.page == "view_broken_mods":
     if user_role not in ["admin", "SUPER_ADMIN"]: st.error("Access Denied.")
     else:
@@ -230,13 +313,38 @@ elif st.session_state.page == "view_broken_mods":
         active = [m for m in DB['mods'] if not m['complete']]
         if not active: st.success("No active issues.")
         for m in active:
+            # Highlight unread items
+            border_col = "red" if not m.get('read', True) else "grey"
             with st.container(border=True):
                 c1, c2 = st.columns([5,1])
                 with c1: 
-                    st.subheader(f"⚠️ {m['name']}")
+                    prefix = "🆕 " if not m.get('read', True) else "⚠️ "
+                    st.subheader(f"{prefix}{m['name']}")
                     st.caption(f"Severity: {m['severity']} | Assigned: {m['assignment']}")
-                with c2: st.button("Details", key=f"d_{m['id']}", on_click=navigate_to, args=("mod_detail", m['id']))
+                with c2: 
+                    if st.button("Details", key=f"d_{m['id']}", on_click=navigate_to, args=("mod_detail", m['id'], None)):
+                        pass
 
+# --- VIEW PROJECTS (NEW WORK) ---
+elif st.session_state.page == "view_projects":
+    st.title("New Work / Active Projects")
+    active_projs = [p for p in DB['projects'] if not p['complete']]
+    
+    if not active_projs:
+        st.info("No active projects.")
+    else:
+        for p in active_projs:
+            with st.container(border=True):
+                c1, c2 = st.columns([5,1])
+                with c1:
+                    prefix = "🆕 " if not p.get('read', True) else "📁 "
+                    st.subheader(f"{prefix}{p['name']}")
+                    st.caption(f"Lead: {p['assigned']}")
+                with c2:
+                    if st.button("Open", key=f"p_{p['id']}", on_click=navigate_to, args=("project_detail", None, p['id'])):
+                        pass
+
+# --- VIEW FIXED MODS ---
 elif st.session_state.page == "view_fixed_mods":
     if user_role not in ["admin", "SUPER_ADMIN"]: st.error("Access Denied.")
     else:
@@ -247,10 +355,18 @@ elif st.session_state.page == "view_fixed_mods":
             with st.container(border=True):
                 c1, c2 = st.columns([5,1])
                 with c1: st.subheader(f"✅ {m['name']}")
-                with c2: st.button("Archive View", key=f"a_{m['id']}", on_click=navigate_to, args=("mod_detail", m['id']))
+                with c2: st.button("Archive View", key=f"a_{m['id']}", on_click=navigate_to, args=("mod_detail", m['id'], None))
 
+# --- MOD DETAIL ---
 elif st.session_state.page == "mod_detail":
     m = next((x for x in DB['mods'] if x['id'] == st.session_state.selected_mod_id), None)
+    
+    # MARK AS READ LOGIC
+    if m and not m.get('read', True) and user_role in ["admin", "SUPER_ADMIN"]:
+        m['read'] = True
+        save_db(DB)
+        st.rerun()
+
     if m:
         st.title(f"Issue: {m['name']}")
         c1, c2 = st.columns([2,1])
@@ -275,16 +391,53 @@ elif st.session_state.page == "mod_detail":
                         st.rerun()
         with c2:
             st.subheader("Discussion")
-            # REMOVED dividers to compact chat
             chat = st.container(height=400, border=True)
             for msg in m.get('discussion', []):
                 chat.markdown(f"**{msg['user']}**: {msg['text']}")
-                # No chat.divider() here -> creates continuous log look
             
             with st.form("chat"):
                 txt = st.text_input("Message")
                 if st.form_submit_button("Send") and txt:
                     m.setdefault('discussion', []).append({"user": USER_NAME, "text": txt, "time": str(datetime.now())})
+                    save_db(DB)
+                    st.rerun()
+
+# --- PROJECT DETAIL (NEW) ---
+elif st.session_state.page == "project_detail":
+    p = next((x for x in DB['projects'] if x['id'] == st.session_state.selected_project_id), None)
+    
+    # MARK AS READ LOGIC
+    if p and not p.get('read', True) and user_role in ["admin", "SUPER_ADMIN"]:
+        p['read'] = True
+        save_db(DB)
+        st.rerun()
+
+    if p:
+        st.title(f"Project: {p['name']}")
+        c1, c2 = st.columns([2,1])
+        with c1:
+            st.caption(f"Lead: {p['assigned']}")
+            st.markdown(p['description'], unsafe_allow_html=True)
+            st.divider()
+            if not p['complete']:
+                if st.button("✅ Mark Complete", type="primary"):
+                    p['complete'] = True
+                    save_db(DB)
+                    st.success("Completed!")
+                    st.session_state.page = "view_projects"
+                    st.rerun()
+            else:
+                st.success("Project Completed.")
+        with c2:
+            st.subheader("Discussion")
+            chat = st.container(height=400, border=True)
+            for msg in p.get('discussion', []):
+                chat.markdown(f"**{msg['user']}**: {msg['text']}")
+            
+            with st.form("p_chat"):
+                txt = st.text_input("Message")
+                if st.form_submit_button("Send") and txt:
+                    p.setdefault('discussion', []).append({"user": USER_NAME, "text": txt, "time": str(datetime.now())})
                     save_db(DB)
                     st.rerun()
 
@@ -412,7 +565,6 @@ elif st.session_state.page == "json_editor":
             json_text = st.text_area("JSON Output", value=st.session_state.editor_content, height=600, key="main_json_editor")
             st.session_state.editor_content = json_text
 
-        # --- RIGHT COLUMN: TOOLS & LIBRARY ---
         with col_tools:
             # FIX: Place Tabs OUTSIDE the scrollable container to effectively "Stick" them to the top
             tab_search, tab_saved, tab_import = st.tabs(["🌐 Search", "💾 Library", "📥 Import"])
