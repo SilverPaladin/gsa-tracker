@@ -22,8 +22,8 @@ def load_db():
             "role_db": {"armasupplyguy@gmail.com": "SUPER_ADMIN"},
             "usernames": {"armasupplyguy@gmail.com": "ArmaSupplyGuy"},
             "passwords": {"armasupplyguy@gmail.com": SYSTEM_PASSWORD},
-            "mods": [],       # STRICTLY FOR BROKEN MODS
-            "projects": [],   # STRICTLY FOR NEW WORK
+            "mods": [],
+            "projects": [],
             "events": [],
             "tutorials": [],
             "announcements": [],
@@ -41,7 +41,6 @@ def load_db():
             if "server_configs" not in data: data["server_configs"] = []
             if "projects" not in data: data["projects"] = []
             
-            # Maintenance: Ensure 'read' key exists
             for m in data.get("mods", []):
                 if "read" not in m: m["read"] = True
             for p in data.get("projects", []):
@@ -200,6 +199,10 @@ st.sidebar.divider()
 
 st.sidebar.button("📢 Announcements", on_click=navigate_to, args=("view_announcements",))
 
+# MOVED: Mod Studio to Top (Super Admin Only)
+if user_role == "SUPER_ADMIN":
+    st.sidebar.button("📝 Mod Studio", on_click=navigate_to, args=("json_editor",))
+
 # --- ADMIN SECTION ---
 if user_role in ["admin", "SUPER_ADMIN"]:
     st.sidebar.subheader("Server Admin")
@@ -217,7 +220,6 @@ if user_role in ["CLPLEAD", "SUPER_ADMIN", "CLP"]:
 if user_role == "SUPER_ADMIN":
     st.sidebar.divider()
     st.sidebar.button("🔑 Assign Roles", on_click=navigate_to, args=("roles",))
-    st.sidebar.button("📝 Mod Studio", on_click=navigate_to, args=("json_editor",))
 
 # --- TOP NAV ---
 if user_role != "staff":
@@ -626,7 +628,12 @@ elif st.session_state.page == "json_editor":
             with tab_saved:
                 # Filter stays at top
                 lib_search = st.text_input("Filter Library", placeholder="Filter by name...")
-                filtered = [m for m in DB['mod_library'] if lib_search.lower() in m.get('name','').lower()]
+                
+                # SORTING: Alphabetical
+                filtered = sorted(
+                    [m for m in DB['mod_library'] if lib_search.lower() in m.get('name','').lower()],
+                    key=lambda x: x.get('name', '').lower()
+                )
                 
                 # Scrollable list of mods below filter
                 with st.container(height=600, border=True):
