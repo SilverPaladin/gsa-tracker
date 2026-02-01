@@ -1,26 +1,23 @@
 import streamlit as st
 import sqlite3
-from datetime import datetime, date
-import calendar
+from datetime import datetime, date, timedelta
 import time
 
 # --- 1. DATABASE SETUP ---
-conn = sqlite3.connect('gsa_master_v25.db', check_same_thread=False)
+conn = sqlite3.connect('gsa_command_v26.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT, username TEXT, role TEXT)')
 c.execute('''CREATE TABLE IF NOT EXISTS projects 
              (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT, sub_category TEXT, title TEXT, details TEXT, 
-              author TEXT, importance TEXT, date_val TEXT, tz TEXT, location TEXT, mission TEXT, is_done INTEGER)''')
+              author TEXT, date_val TEXT, location TEXT, mission TEXT, is_done INTEGER)''')
 conn.commit()
 
 # --- 2. SESSION STATE ---
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "view" not in st.session_state: st.session_state.view = "home"
-if "cal_month" not in st.session_state: st.session_state.cal_month = datetime.now().month
-if "cal_year" not in st.session_state: st.session_state.cal_year = datetime.now().year
-if "sel_cal_date" not in st.session_state: st.session_state.sel_cal_date = str(date.today())
+if "roster_offset" not in st.session_state: st.session_state.roster_offset = 0
 
-# --- 3. CSS: DISCORD DARK THEME & BUTTON STATES ---
+# --- 3. THEME & CSS ---
 st.set_page_config(page_title="GSA Command", layout="wide")
 st.markdown("""
 <style>
@@ -28,16 +25,8 @@ st.markdown("""
     .stButton>button { width: 100%; text-align: left !important; background-color: transparent !important; color: #b9bbbe !important; border: none !important; }
     .stButton>button:hover { background-color: #35373c !important; color: #fff !important; }
     
-    /* Calendar Button Base */
-    div.stButton > button[key^="day_"] {
-        height: 50px !important;
-        width: 100% !important;
-        border-radius: 4px !important;
-        border: 1px solid #333 !important;
-        background-color: #1e1f22 !important;
-        margin: 1px !important;
-        text-align: center !important;
-    }
+    .timeline-card { background-color: #2b2d31; border-radius: 8px; padding: 15px; margin-bottom: 10px; border-left: 5px solid #5865f2; }
+    .date-header { color: #43b581; font-weight: bold; font-size: 1.1em; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -55,21 +44,21 @@ if not st.session_state.logged_in:
                 if user:
                     st.session_state.update({"logged_in": True, "user_name": user[0], "role": user[1]})
                     st.rerun()
-                else: st.error("Access Denied.")
         with t2:
             re = st.text_input("NEW EMAIL").strip().lower()
             ru = st.text_input("USERNAME").strip()
             rp = st.text_input("NEW PASSWORD", type="password")
             if st.button("CREATE ACCOUNT"):
                 try:
+                    # Auto-admin for you
                     role = "Super Admin" if re == "armasupplyguy@gmail.com" else "Competitive Player"
                     c.execute("INSERT INTO users VALUES (?,?,?,?)", (re, rp, ru, role))
                     conn.commit()
-                    st.success("Registered! Log in above.")
-                except: st.error("User exists.")
+                    st.success("Account Created! Login above.")
+                except: st.error("Email already in use.")
     st.stop()
 
-# --- 5. SIDEBAR NAVIGATION ---
+# --- 5. SIDEBAR ---
 role = st.session_state.role
 is_lead = role in ["Super Admin", "Competitive Lead"]
 
@@ -84,122 +73,98 @@ with st.sidebar:
             if st.button(f"# mods-to-create", key=f"btn_{s}_c"): st.session_state.view = f"{s}_CREATE"; st.rerun()
             if st.button(f"# mods-to-fix", key=f"btn_{s}_f"): st.session_state.view = f"{s}_FIX"; st.rerun()
 
-    # LEAD CATEGORIES
-    if is_lead:
-        with st.expander("CLP LEADS", expanded=True):
-            if st.button("# training-calendar", key="l_cal"): st.session_state.view = "CALENDAR"; st.rerun()
-            if st.button("# player-repository", key="l_repo"): st.session_state.view = "REPO"; st.rerun()
+    # CLP PANEL (Combined view)
+    with st.expander("CLP PANEL", expanded=True):
+        if st.button("# scheduling-roster", key="nav_sch"): st.session_state.view = "ROSTER"; st.rerun()
+        if st.button("# tutorials", key="nav_tut"): st.session_state.view = "TUTORIALS"; st.rerun()
 
-    # PLAYER CATEGORIES
-    with st.expander("CLP PLAYERS", expanded=True):
-        if st.button("# view-calendar", key="p_cal"): st.session_state.view = "CALENDAR"; st.rerun()
-        if st.button("# tutorials", key="p_tut"): st.session_state.view = "TUTORIALS"; st.rerun()
+    if is_lead:
+        with st.expander("ADMIN", expanded=True):
+            if st.button("# player-repository", key="nav_repo"): st.session_state.view = "REPO"; st.rerun()
 
     st.divider()
     if st.button("🚪 Logout"): st.session_state.logged_in = False; st.rerun()
 
-# --- 6. SCHEDULING TAB (REBUILT CALENDAR) ---
-if st.session_state.view == "CALENDAR":
-    st.title("🗓️ CLP Training Schedule")
+# --- 6. TIMELINE ROSTER VIEW (BETTER THAN CALENDAR) ---
+if st.session_state.view == "ROSTER":
+    st.title("🗓️ Training Roster")
+    st.write("A vertical timeline of the next 14 days.")
+
+    # Show 14 days starting from today
+    today = date.today()
     
-    col_cal, col_form = st.columns([1.2, 1])
+    col_timeline, col_editor = st.columns([1.5, 1])
 
-    with col_cal:
-        # Month Controls
-        m1, m2, m3 = st.columns([1, 2, 1])
-        if m1.button("◀"):
-            st.session_state.cal_month -= 1
-            if st.session_state.cal_month < 1: st.session_state.cal_month = 12; st.session_state.cal_year -= 1
-            st.rerun()
-        m2.markdown(f"<h3 style='text-align:center;'>{calendar.month_name[st.session_state.cal_month]} {st.session_state.cal_year}</h3>", unsafe_allow_html=True)
-        if m3.button("▶"):
-            st.session_state.cal_month += 1
-            if st.session_state.cal_month > 12: st.session_state.cal_month = 1; st.session_state.cal_year += 1
-            st.rerun()
-
-        # Build Calendar Logic
-        cal = calendar.Calendar(firstweekday=6)
-        weeks = cal.monthdayscalendar(st.session_state.cal_year, st.session_state.cal_month)
-        scheduled_dates = [x[0] for x in c.execute("SELECT date_val FROM projects WHERE category='CAL'").fetchall()]
-
-        # Display Weekdays
-        cols = st.columns(7)
-        for i, d in enumerate(['S', 'M', 'T', 'W', 'T', 'F', 'S']):
-            cols[i].markdown(f"<p style='text-align:center;color:gray;'>{d}</p>", unsafe_allow_html=True)
-
-        for week in weeks:
-            cols = st.columns(7)
-            for i, day in enumerate(week):
-                if day != 0:
-                    d_str = f"{st.session_state.cal_year}-{st.session_state.cal_month:02d}-{day:02d}"
-                    
-                    # DETERMINING BUTTON STYLE
-                    # Green if has event, Blue if selected
-                    btn_color = "#1e1f22" # Default
-                    btn_border = "1px solid #333"
-                    
-                    if d_str in scheduled_dates:
-                        btn_border = "2px solid #43b581" # Green border for event
-                    if d_str == st.session_state.sel_cal_date:
-                        btn_color = "#5865f2" # Blue background for selection
-                        btn_border = "2px solid white"
-
-                    # CSS Injection for this specific button
-                    st.markdown(f"""<style>button[key="day_{d_str}"] {{ 
-                        background-color: {btn_color} !important; 
-                        border: {btn_border} !important; 
-                        color: white !important; 
-                        border-radius: {'50%' if d_str in scheduled_dates and d_str != st.session_state.sel_cal_date else '4px'} !important;
-                    }}</style>""", unsafe_allow_html=True)
-                    
-                    if cols[i].button(str(day), key=f"day_{d_str}"):
-                        st.session_state.sel_cal_date = d_str
-                        st.rerun()
-
-    with col_form:
-        active_date = st.session_state.sel_cal_date
-        db_ev = c.execute("SELECT * FROM projects WHERE category='CAL' AND date_val=?", (active_date,)).fetchone()
-        
-        st.subheader(f"Training Details: {active_date}")
-        if is_lead:
-            with st.form("sch_form"):
-                f_t = st.text_input("Time", value=db_ev[3] if db_ev else "")
-                f_l = st.text_input("Location", value=db_ev[9] if db_ev else "")
-                f_m = st.text_area("Mission", value=db_ev[10] if db_ev else "")
-                if st.form_submit_button("Save"):
-                    if db_ev:
-                        c.execute("UPDATE projects SET title=?, location=?, mission=? WHERE id=?", (f_t, f_l, f_m, db_ev[0]))
-                    else:
-                        c.execute("INSERT INTO projects (category, date_val, title, location, mission) VALUES ('CAL',?,?,?,?)", (active_date, f_t, f_l, f_m))
-                    conn.commit()
-                    st.success("Updated")
-                    time.sleep(0.5); st.rerun()
-        elif db_ev:
-            st.info(f"**TIME:** {db_ev[3]}\n\n**LOC:** {db_ev[9]}\n\n**INFO:** {db_ev[10]}")
-        else:
-            st.write("No training scheduled.")
-
-# --- 7. MOD TASK VIEWS (SERVER 1 & 2) ---
-elif "CREATE" in st.session_state.view or "FIX" in st.session_state.view:
-    title = st.session_state.view.replace("_", " ")
-    st.title(title)
-    
-    with st.expander("＋ Add Entry"):
-        with st.form("task_f"):
-            m_n = st.text_input("Mod Name")
-            m_d = st.text_area("Details")
-            if st.form_submit_button("Post"):
-                c.execute("INSERT INTO projects (category, sub_category, title, details, is_done) VALUES (?,?,?,?,0)", 
-                          (st.session_state.view, "TASK", m_n, m_d))
-                conn.commit(); st.rerun()
+    with col_timeline:
+        for i in range(14):
+            day = today + timedelta(days=i)
+            d_str = day.strftime("%Y-%m-%d")
+            d_pretty = day.strftime("%A, %b %d")
+            
+            # Check if event exists
+            ev = c.execute("SELECT * FROM projects WHERE category='CAL' AND date_val=?", (d_str,)).fetchone()
+            
+            with st.container():
+                st.markdown(f"""
+                <div class="timeline-card">
+                    <span class="date-header">{d_pretty}</span>
+                    <hr style="margin: 5px 0; border: 0.5px solid #444;">
+                    <p style="margin:0;"><b>Status:</b> {'✅ Scheduled' if ev else '⚪ Empty'}</p>
+                    {f'<p style="margin:0; color:#5865f2;"><b>Time:</b> {ev[3]} | <b>Loc:</b> {ev[7]}</p>' if ev else ''}
+                </div>
+                """, unsafe_allow_html=True)
                 
+                # Selection button for the editor
+                if st.button(f"Manage {day.strftime('%d %b')}", key=f"sel_{d_str}"):
+                    st.session_state.sel_date = d_str
+                    st.rerun()
+
+    with col_editor:
+        sel_date = st.session_state.get("sel_date", str(today))
+        st.subheader(f"Edit Details: {sel_date}")
+        
+        if is_lead:
+            current_ev = c.execute("SELECT * FROM projects WHERE category='CAL' AND date_val=?", (sel_date,)).fetchone()
+            with st.form("edit_roster"):
+                f_time = st.text_input("Time", value=current_ev[3] if current_ev else "")
+                f_loc = st.text_input("Location", value=current_ev[7] if current_ev else "")
+                f_miss = st.text_area("Mission Info", value=current_ev[8] if current_ev else "")
+                
+                if st.form_submit_button("Save Entry"):
+                    if current_ev:
+                        c.execute("UPDATE projects SET title=?, location=?, mission=? WHERE id=?", (f_time, f_loc, f_miss, current_ev[0]))
+                    else:
+                        c.execute("INSERT INTO projects (category, date_val, title, location, mission) VALUES ('CAL',?,?,?,?)", (sel_date, f_time, f_loc, f_miss))
+                    conn.commit()
+                    st.success("Roster Updated")
+                    time.sleep(0.5); st.rerun()
+            
+            if current_ev and st.button("🗑️ Delete Event"):
+                c.execute("DELETE FROM projects WHERE id=?", (current_ev[0],))
+                conn.commit(); st.rerun()
+        else:
+            st.warning("Only Leads can edit the roster.")
+
+# --- 7. SERVER TASKS (RESTORED) ---
+elif "CREATE" in st.session_state.view or "FIX" in st.session_state.view:
+    st.title(st.session_state.view.replace("_", " "))
+    with st.expander("＋ Post New Mod Task"):
+        with st.form("task_entry"):
+            t_name = st.text_input("Mod Name")
+            t_det = st.text_area("What needs to be done?")
+            if st.form_submit_button("Submit"):
+                c.execute("INSERT INTO projects (category, title, details, is_done) VALUES (?,?,?,0)", 
+                          (st.session_state.view, t_name, t_det))
+                conn.commit(); st.rerun()
+
     tasks = c.execute("SELECT * FROM projects WHERE category=? AND is_done=0", (st.session_state.view,)).fetchall()
     for t in tasks:
         with st.container(border=True):
-            st.markdown(f"**{t[3]}**")
+            st.write(f"**{t[3]}**")
             st.write(t[4])
-            if st.button("Resolve", key=f"res_{t[0]}"):
+            if st.button("Complete", key=f"done_{t[0]}"):
                 c.execute("UPDATE projects SET is_done=1 WHERE id=?", (t[0],)); conn.commit(); st.rerun()
 
 else:
     st.markdown(f"## Welcome back, {st.session_state.user_name}")
+    st.write("Use the sidebar to navigate to the timeline or server tasks.")
