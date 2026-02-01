@@ -7,7 +7,7 @@ from PIL import Image
 import hashlib
 
 # --- 1. DATABASE SETUP ---
-conn = sqlite3.connect('gsa_workspace_v10.db', check_same_thread=False)
+conn = sqlite3.connect('gsa_workspace_v11.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT, username TEXT, role TEXT)')
 c.execute('CREATE TABLE IF NOT EXISTS categories (name TEXT UNIQUE, role_required TEXT, sort_order INTEGER)')
@@ -29,15 +29,11 @@ st.set_page_config(page_title="GSA Workspace", layout="wide", initial_sidebar_st
 st.markdown("""
 <style>
     .main .block-container { max-width: 100vw !important; padding: 1rem 2rem !important; }
-    
-    /* Status Lights */
     .status-light { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 12px; box-shadow: 0 0 5px currentColor; }
     .light-low      { color: #0088ff; background-color: #0088ff; }
     .light-medium   { color: #00ff88; background-color: #00ff88; }
     .light-high     { color: #ffaa00; background-color: #ffaa00; }
     .light-critical { color: #ff4444; background-color: #ff4444; }
-
-    /* Flat Sidebar & Buttons */
     [data-testid="stSidebar"] { background-color: #111 !important; border-right: none !important; }
     .stButton>button { 
         width: 100%; text-align: left !important; 
@@ -45,8 +41,6 @@ st.markdown("""
         padding: 12px 15px !important; border: none !important; border-radius: 0px !important;
     }
     .stButton>button:hover { background-color: #222 !important; }
-
-    /* Clean Chat */
     .chat-line { padding: 6px 0px; font-size: 18px !important; font-weight: 600; }
     .timestamp { color: #444; font-size: 11px; margin-left: 10px; }
 </style>
@@ -62,7 +56,7 @@ def get_user_color(username):
     hash_obj = hashlib.md5(username.lower().encode())
     return f"#{hash_obj.hexdigest()[:6]}"
 
-# --- 5. AUTHENTICATION (The Gatekeeper) ---
+# --- 5. AUTHENTICATION ---
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "view" not in st.session_state: st.session_state.view = "home"
 
@@ -73,7 +67,7 @@ if not st.session_state.logged_in:
         auth_tab1, auth_tab2 = st.tabs(["SIGN IN", "CREATE ACCOUNT"])
         
         with auth_tab1:
-            login_email = st.text_input("EMAIL", key="log_e")
+            login_email = st.text_input("EMAIL", key="log_e").strip().lower()
             login_pass = st.text_input("PASSWORD", type="password", key="log_p")
             if st.button("UNLOCK", use_container_width=True):
                 user_res = c.execute("SELECT username, role FROM users WHERE email=? AND password=?", (login_email, login_pass)).fetchone()
@@ -82,26 +76,23 @@ if not st.session_state.logged_in:
                     st.session_state.user_name = user_res[0]
                     st.session_state.role = user_res[1]
                     st.rerun()
-                else:
-                    st.error("Invalid credentials.")
+                else: st.error("Invalid credentials.")
         
         with auth_tab2:
             new_user = st.text_input("USERNAME", key="reg_u")
-            new_email = st.text_input("EMAIL", key="reg_e")
+            new_email = st.text_input("EMAIL", key="reg_e").strip().lower()
             new_pass = st.text_input("PASSWORD", type="password", key="reg_p")
             if st.button("REGISTER", use_container_width=True):
                 if new_user and new_email and new_pass:
                     try:
-                        # First user becomes Super Admin
-                        count = c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-                        assigned_role = "Super Admin" if count == 0 else "pending"
+                        # SUPER ADMIN CHECK: Only your email gets the crown
+                        assigned_role = "Super Admin" if new_email == "armasupplyguy@gmail.com" else "pending"
                         c.execute("INSERT INTO users VALUES (?,?,?,?)", (new_email, new_pass, new_user, assigned_role))
                         conn.commit()
                         st.success(f"Registered as {assigned_role}. Please sign in.")
                     except sqlite3.IntegrityError:
                         st.error("Email already in use.")
-                else:
-                    st.warning("Please fill all fields.")
+                else: st.warning("Please fill all fields.")
     st.stop()
 
 # --- 6. PERMISSIONS & SIDEBAR ---
@@ -110,16 +101,13 @@ is_super = user_role == "Super Admin"
 
 with st.sidebar:
     st.markdown(f"### ✨ {st.session_state.user_name.lower()}")
-    st.caption(f"Access Level: {user_role}")
+    st.caption(f"Role: {user_role}")
     
     if user_role != "pending":
         if st.button("🏠 HOME"): st.session_state.view = "home"; st.rerun()
         
-        # Sort categories by sort_order
-        if is_super:
-            cats = c.execute("SELECT name FROM categories ORDER BY sort_order ASC").fetchall()
-        else:
-            cats = c.execute("SELECT name FROM categories WHERE role_required=? ORDER BY sort_order ASC", (user_role,)).fetchall()
+        cats = c.execute("SELECT name FROM categories ORDER BY sort_order ASC").fetchall() if is_super else \
+               c.execute("SELECT name FROM categories WHERE role_required=? ORDER BY sort_order ASC", (user_role,)).fetchall()
 
         st.divider()
         for (cat_name,) in cats:
@@ -146,12 +134,11 @@ with st.sidebar:
 # --- 7. MAIN VIEWS ---
 if user_role == "pending":
     st.markdown("<h1 style='font-weight:200; margin-top:15vh;'>access restricted.</h1>", unsafe_allow_html=True)
-    st.write("Your account is pending admin approval.")
+    st.write(f"Account ({st.session_state.user_name}) is pending admin approval.")
 
 elif st.session_state.view == "admin_panel" and is_super:
     st.markdown("<h1>control panel</h1>", unsafe_allow_html=True)
     t1, t2 = st.tabs(["USER ROLES", "ARRANGE CATEGORIES"])
-    
     with t1:
         users_list = c.execute("SELECT username, email, role FROM users").fetchall()
         role_opts = ["pending", "Server Admin", "Game Admin", "Competitive Lead", "Competitive Player", "Media Team", "Pathfinders", "Super Admin"]
@@ -160,31 +147,25 @@ elif st.session_state.view == "admin_panel" and is_super:
             c1.write(f"**{un}**\n{ue}")
             nr = c2.selectbox("Role", role_opts, index=role_opts.index(ur), key=f"r_{ue}")
             if c3.button("Save", key=f"u_{ue}"):
-                c.execute("UPDATE users SET role=? WHERE email=?", (nr, ue))
-                conn.commit(); st.rerun()
-    
+                c.execute("UPDATE users SET role=? WHERE email=?", (nr, ue)); conn.commit(); st.rerun()
     with t2:
-        st.write("Numerical Priority (0 is top)")
         all_cats = c.execute("SELECT name, sort_order FROM categories ORDER BY sort_order ASC").fetchall()
         for cn, co in all_cats:
             col1, col2 = st.columns([0.8, 0.2])
             col1.write(f"**{cn}**")
             new_ord = col2.number_input("Order", value=co, key=f"ord_{cn}", step=1)
             if new_ord != co:
-                c.execute("UPDATE categories SET sort_order=? WHERE name=?", (new_ord, cn))
-                conn.commit(); st.rerun()
+                c.execute("UPDATE categories SET sort_order=? WHERE name=?", (new_ord, cn)); conn.commit(); st.rerun()
 
 elif st.session_state.view == "create_project":
     st.markdown(f"<h1>new {st.session_state.target_cat.lower()} task</h1>", unsafe_allow_html=True)
     with st.form("new_task_f"):
-        t_input = st.text_input("Title")
-        s_input = st.selectbox("Severity", ["Low", "Medium", "High", "Critical"])
-        d_input = st.text_area("Details")
-        i_file = st.file_uploader("Attach Photo", type=['png', 'jpg', 'jpeg'])
+        t_input, s_input = st.text_input("Title"), st.selectbox("Severity", ["Low", "Medium", "High", "Critical"])
+        d_input, i_file = st.text_area("Details"), st.file_uploader("Photo", type=['png', 'jpg', 'jpeg'])
         if st.form_submit_button("Initialize Task"):
-            b64_data = img_to_base64(Image.open(i_file)) if i_file else None
+            b64 = img_to_base64(Image.open(i_file)) if i_file else None
             c.execute("INSERT INTO projects (category, title, details, assigned_user, is_done, importance, image_data) VALUES (?,?,?,?,0,?,?)",
-                      (st.session_state.target_cat, t_input, d_input, st.session_state.user_name, s_input, b64_data))
+                      (st.session_state.target_cat, t_input, d_input, st.session_state.user_name, s_input, b64))
             conn.commit(); st.session_state.view = "home"; st.rerun()
 
 elif st.session_state.view == "view_project":
