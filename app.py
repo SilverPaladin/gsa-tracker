@@ -17,7 +17,7 @@ def load_db():
     if not os.path.exists(DB_FILE):
         default_data = {
             "role_db": {"armasupplyguy@gmail.com": "SUPER_ADMIN"},
-            "usernames": {"armasupplyguy@gmail.com": "ArmaSupplyGuy"}, # Default Username
+            "usernames": {"armasupplyguy@gmail.com": "ArmaSupplyGuy"},
             "passwords": {"armasupplyguy@gmail.com": SYSTEM_PASSWORD},
             "mods": [],
             "events": [],
@@ -31,7 +31,6 @@ def load_db():
     try:
         with open(DB_FILE, 'r') as f:
             data = json.load(f)
-            # Migration check: Ensure 'usernames' exists for old databases
             if "usernames" not in data:
                 data["usernames"] = {}
             return data
@@ -95,7 +94,6 @@ if not st.session_state.logged_in:
 
         with signup_tab:
             with st.container(border=True):
-                # NEW FIELD: USERNAME
                 new_user = st.text_input("Username", key="sign_user")
                 new_email = st.text_input("New Email", key="sign_email")
                 new_pass = st.text_input("New Password", type="password", key="sign_pwd")
@@ -109,18 +107,17 @@ if not st.session_state.logged_in:
                     elif new_email and new_pass and new_user:
                         DB['role_db'][new_email] = "staff"
                         DB['passwords'][new_email] = new_pass
-                        DB['usernames'][new_email] = new_user # Save Username
+                        DB['usernames'][new_email] = new_user
                         save_db(DB) 
                         st.success("Account created! Please login.")
                     else:
-                        st.warning("All fields (including Username) are required.")
+                        st.warning("All fields are required.")
     st.stop()
 
 # =========================================================
 #  MAIN APP
 # =========================================================
 USER_EMAIL = st.session_state.current_user
-# Fallback for legacy users who might not have a username set
 USER_NAME = DB['usernames'].get(USER_EMAIL, USER_EMAIL.split('@')[0])
 user_role = DB['role_db'].get(USER_EMAIL, "staff")
 
@@ -134,7 +131,7 @@ def get_mod_status():
 
 # --- SIDEBAR ---
 st.sidebar.title("🛠 Staff Portal")
-st.sidebar.write(f"User: **{USER_NAME}**") # Show Username, not email
+st.sidebar.write(f"User: **{USER_NAME}**")
 if st.sidebar.button("🚪 Logout"):
     st.session_state.logged_in = False
     st.rerun()
@@ -160,15 +157,28 @@ if user_role == "SUPER_ADMIN":
     st.sidebar.divider()
     st.sidebar.button("🔑 Assign Roles", on_click=navigate_to, args=("roles",))
 
-# --- TOP NAV (HIDDEN FOR STAFF) ---
+# --- DYNAMIC TOP NAV ---
+# Logic: Staff sees NOTHING. Admins see EVERYTHING. CLP sees LIMITED.
 if user_role != "staff":
-    cols = st.columns(6)
-    with cols[0]: st.button("Broken Mods", use_container_width=True, on_click=navigate_to, args=("view_broken_mods",))
-    with cols[1]: st.button("Fixed", use_container_width=True, on_click=navigate_to, args=("view_fixed_mods",))
-    with cols[2]: st.button("Tutorials", use_container_width=True, on_click=navigate_to, args=("view_tutorials",))
-    with cols[3]: st.button("Training Schedules", use_container_width=True, on_click=navigate_to, args=("view_events",))
-    with cols[4]: st.button("Events", use_container_width=True, on_click=navigate_to, args=("view_events",))
-    with cols[5]: st.button("Users", use_container_width=True, on_click=navigate_to, args=("view_users",))
+    menu_items = []
+    
+    # 1. Admin Only Items
+    if user_role in ["admin", "SUPER_ADMIN"]:
+        menu_items.append({"label": "Broken Mods", "page": "view_broken_mods"})
+        menu_items.append({"label": "Fixed", "page": "view_fixed_mods"})
+    
+    # 2. Common Items (CLP, CLPLEAD, Admin, Super Admin)
+    menu_items.append({"label": "Tutorials", "page": "view_tutorials"})
+    menu_items.append({"label": "Training Schedules", "page": "view_events"})
+    menu_items.append({"label": "Events", "page": "view_events"})
+    menu_items.append({"label": "Users", "page": "view_users"})
+
+    # Render the Menu
+    cols = st.columns(len(menu_items))
+    for i, item in enumerate(menu_items):
+        with cols[i]:
+            st.button(item["label"], use_container_width=True, on_click=navigate_to, args=(item["page"],))
+    
     st.markdown("---")
 
 # --- PAGES ---
@@ -215,26 +225,34 @@ elif st.session_state.page == "report_broken_mod":
         st.rerun()
 
 elif st.session_state.page == "view_broken_mods":
-    st.title("Active Broken Mods")
-    active = [m for m in DB['mods'] if not m['complete']]
-    if not active: st.success("No active issues.")
-    for m in active:
-        with st.container(border=True):
-            c1, c2 = st.columns([5,1])
-            with c1: 
-                st.subheader(f"⚠️ {m['name']}")
-                st.caption(f"Severity: {m['severity']} | Assigned: {m['assignment']}")
-            with c2: st.button("Details", key=f"d_{m['id']}", on_click=navigate_to, args=("mod_detail", m['id']))
+    # DOUBLE CHECK ACCESS (Security Layer)
+    if user_role not in ["admin", "SUPER_ADMIN"]:
+        st.error("Access Denied.")
+    else:
+        st.title("Active Broken Mods")
+        active = [m for m in DB['mods'] if not m['complete']]
+        if not active: st.success("No active issues.")
+        for m in active:
+            with st.container(border=True):
+                c1, c2 = st.columns([5,1])
+                with c1: 
+                    st.subheader(f"⚠️ {m['name']}")
+                    st.caption(f"Severity: {m['severity']} | Assigned: {m['assignment']}")
+                with c2: st.button("Details", key=f"d_{m['id']}", on_click=navigate_to, args=("mod_detail", m['id']))
 
 elif st.session_state.page == "view_fixed_mods":
-    st.title("Fixed Mods Archive")
-    fixed = [m for m in DB['mods'] if m['complete']]
-    if not fixed: st.info("Empty archive.")
-    for m in fixed:
-        with st.container(border=True):
-            c1, c2 = st.columns([5,1])
-            with c1: st.subheader(f"✅ {m['name']}")
-            with c2: st.button("Archive View", key=f"a_{m['id']}", on_click=navigate_to, args=("mod_detail", m['id']))
+    # DOUBLE CHECK ACCESS
+    if user_role not in ["admin", "SUPER_ADMIN"]:
+        st.error("Access Denied.")
+    else:
+        st.title("Fixed Mods Archive")
+        fixed = [m for m in DB['mods'] if m['complete']]
+        if not fixed: st.info("Empty archive.")
+        for m in fixed:
+            with st.container(border=True):
+                c1, c2 = st.columns([5,1])
+                with c1: st.subheader(f"✅ {m['name']}")
+                with c2: st.button("Archive View", key=f"a_{m['id']}", on_click=navigate_to, args=("mod_detail", m['id']))
 
 elif st.session_state.page == "mod_detail":
     m = next((x for x in DB['mods'] if x['id'] == st.session_state.selected_mod_id), None)
@@ -246,19 +264,24 @@ elif st.session_state.page == "mod_detail":
             if m.get('json_data'): st.code(m['json_data'], language='json')
             st.markdown(m['description'], unsafe_allow_html=True)
             st.divider()
-            if not m['complete']:
-                if st.button("✅ Mark Resolved", type="primary"):
-                    m['complete'] = True
-                    save_db(DB)
-                    st.success("Resolved!")
-                    st.session_state.page = "view_fixed_mods"
-                    st.rerun()
-            else:
-                st.success("Resolved.")
-                if st.button("Re-open"):
-                    m['complete'] = False
-                    save_db(DB)
-                    st.rerun()
+            # Only Admins can Resolve
+            if user_role in ["admin", "SUPER_ADMIN"]:
+                if not m['complete']:
+                    if st.button("✅ Mark Resolved", type="primary"):
+                        m['complete'] = True
+                        save_db(DB)
+                        st.success("Resolved!")
+                        st.session_state.page = "view_fixed_mods"
+                        st.rerun()
+                else:
+                    st.success("Resolved.")
+                    if st.button("Re-open"):
+                        m['complete'] = False
+                        save_db(DB)
+                        st.rerun()
+            elif m['complete']:
+                st.success("This issue is Resolved.")
+                
         with c2:
             st.subheader("Discussion")
             chat = st.container(height=400, border=True)
@@ -320,37 +343,47 @@ elif st.session_state.page == "view_tutorials":
             st.subheader(t['title'])
             st.markdown(t['content'], unsafe_allow_html=True)
 
-# --- VIEW USERS (UPDATED: USERNAMES & PRIVACY) ---
 elif st.session_state.page == "view_users":
     st.title("Staff Roster")
     for email, role in DB['role_db'].items():
         with st.container(border=True):
             c1, c2, c3 = st.columns([1,4,2])
-            
-            # 1. Get Username (Default to 'Unknown' if missing)
             u_name = DB.get('usernames', {}).get(email, "Unknown User")
-            
             with c1: st.write("👤")
             with c2: 
-                # 2. Show Username Main
                 st.subheader(u_name)
-                # 3. Restrict Email Visibility
                 if user_role == "SUPER_ADMIN":
-                    st.caption(f"Email: {email}") # Only Super Admin sees this
+                    st.caption(f"Email: {email}")
                 st.caption(f"Role: {role}")
             with c3:
                 st.write("🟢 Online" if email == USER_EMAIL else "⚪ Offline")
 
 elif st.session_state.page == "roles":
     st.title("Role Management")
-    u_email = st.text_input("Email to Update")
-    u_role = st.selectbox("New Role", ["admin", "CLPLEAD", "CLP", "staff"])
-    if st.button("Update"):
-        if u_email in DB['role_db']:
-            DB['role_db'][u_email] = u_role
-            save_db(DB)
-            st.success("Updated!")
-        else:
-            st.error("User not found.")
+    
+    with st.container(border=True):
+        st.subheader("Update User Role")
+        u_email = st.text_input("User Email to Update")
+        u_role = st.selectbox("New Role", ["admin", "CLPLEAD", "CLP", "staff"])
+        if st.button("Update Role"):
+            if u_email in DB['role_db']:
+                DB['role_db'][u_email] = u_role
+                save_db(DB)
+                st.success("Updated!")
+            else:
+                st.error("User not found.")
+
+    with st.expander("❌ Delete User (Danger Zone)"):
+        st.warning("This action cannot be undone.")
+        del_email = st.text_input("Enter Email to Delete")
+        if st.button("Permanently Delete User", type="primary"):
+            if del_email in DB['role_db']:
+                del DB['role_db'][del_email]
+                if del_email in DB['passwords']: del DB['passwords'][del_email]
+                if del_email in DB['usernames']: del DB['usernames'][del_email]
+                save_db(DB)
+                st.success(f"User {del_email} deleted.")
+            else:
+                st.error("User not found.")
     
     st.table(pd.DataFrame(DB['role_db'].items(), columns=["Email", "Role"]))
