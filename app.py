@@ -17,7 +17,7 @@ if "role_db" not in st.session_state:
         "player1@gmail.com": "CLP"
     }
 
-# Initialize Mods with Discussion capabilities
+# Initialize Mods
 if "mods" not in st.session_state:
     st.session_state.mods = []
 
@@ -100,7 +100,7 @@ if user_role == "SUPER_ADMIN":
         st.session_state.page = "roles"
 
 # --- PAGE: REPORT BROKEN MOD (LANDING) ---
-if st.session_state.page == "report_broken_mod":
+elif st.session_state.page == "report_broken_mod":
     st.title("Report Broken Mod")
     
     # Creation Form
@@ -136,6 +136,10 @@ elif st.session_state.page == "mod_detail":
     if current_mod:
         st.title(f"Issue: {current_mod['name']}")
         
+        # --- FIX: Ensure 'discussion' key exists to prevent crash ---
+        if 'discussion' not in current_mod:
+            current_mod['discussion'] = []
+        
         # Split layout: Report on Left (2), Chat on Right (1)
         col_report, col_chat = st.columns([2, 1])
         
@@ -163,7 +167,8 @@ elif st.session_state.page == "mod_detail":
             
             # Chat History Display
             chat_container = st.container(height=400, border=True)
-            for msg in current_mod['discussion']:
+            # Safe loop using .get() just in case
+            for msg in current_mod.get('discussion', []):
                 chat_container.markdown(f"**{msg['user']}**: {msg['text']}")
                 chat_container.caption(f"{msg['time']}")
                 chat_container.divider()
