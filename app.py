@@ -1,120 +1,121 @@
 import streamlit as st
 import sqlite3
-from datetime import datetime
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="GSA Pro-Tracker", layout="wide", initial_sidebar_state="expanded")
-
-# --- DATABASE UPGRADES ---
-conn = sqlite3.connect('gsa_pro.db', check_same_thread=False)
+# --- DATABASE SETUP ---
+conn = sqlite3.connect('gsa_discord.db', check_same_thread=False)
 c = conn.cursor()
-c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT)')
 c.execute('CREATE TABLE IF NOT EXISTS categories (name TEXT UNIQUE)')
 c.execute('''CREATE TABLE IF NOT EXISTS projects 
-             (id INTEGER PRIMARY KEY, owner TEXT, assigned_to TEXT, category TEXT, 
-              title TEXT, importance TEXT, details TEXT, is_done INTEGER)''')
-c.execute('CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY, project_id INTEGER, user TEXT, msg TEXT, timestamp TEXT)')
+             (id INTEGER PRIMARY KEY, category TEXT, title TEXT, details TEXT, is_done INTEGER)''')
 conn.commit()
 
-# --- CUSTOM CSS FOR STYLING ---
+# --- CSS FOR DISCORD LOOK ---
 st.markdown("""
 <style>
-    .project-card-white { background-color: #ffffff; padding: 20px; border-radius: 10px; border: 1px solid #ddd; margin-bottom: 10px; color: black; }
-    .project-card-grey { background-color: #e0e0e0; padding: 20px; border-radius: 10px; border: 1px solid #bbb; margin-bottom: 10px; color: #777; }
-    .splash-card { background: #262730; color: white; padding: 50px; border-radius: 15px; text-align: center; cursor: pointer; transition: 0.3s; }
-    .splash-card:hover { background: #ff4b4b; }
+    [data-testid="stSidebar"] { background-color: #2f3136; color: white; }
+    .stButton>button { width: 100%; border-radius: 5px; text-align: left; }
+    .category-header { font-size: 12px; font-weight: bold; color: #8e9297; text-transform: uppercase; margin-top: 15px; display: flex; justify-content: space-between; }
+    .project-card { background-color: white; padding: 20px; border-radius: 8px; color: black; border-left: 5px solid #5865f2; }
+    .project-card-done { background-color: #f2f2f2; padding: 20px; border-radius: 8px; color: #72767d; border-left: 5px solid #b9bbbe; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- SESSION STATE INITIALIZATION ---
-if "page" not in st.session_state: st.session_state.page = "splash"
-if "logged_in" not in st.session_state: st.session_state.logged_in = False
+# --- SESSION STATE ---
+if "active_project" not in st.session_state: st.session_state.active_project = None
+if "view" not in st.session_state: st.session_state.view = "home"
 
-# --- SPLASH SCREEN ---
-if st.session_state.page == "splash":
-    st.title("🌟 GSA Welcome Screen")
+# --- SIDEBAR (DISCORD STYLE) ---
+with st.sidebar:
+    st.title("🎮 GSA Work")
+    if st.button("🏠 Home"):
+        st.session_state.active_project = None
+        st.session_state.view = "home"
+        st.rerun()
+
+    st.divider()
+    
+    # Category Management
+    c.execute("SELECT name FROM categories")
+    all_cats = [r[0] for r in c.fetchall()]
+
+    for cat in all_cats:
+        # Header with small + icon
+        col_cat, col_add = st.columns([4, 1])
+        with col_cat:
+            st.markdown(f"<div class='category-header'>{cat}</div>", unsafe_allow_html=True)
+        with col_add:
+            if st.button("➕", key=f"add_to_{cat}"):
+                st.session_state.view = "create_project"
+                st.session_state.target_cat = cat
+                st.rerun()
+        
+        # Projects under this category
+        c.execute("SELECT id, title, is_done FROM projects WHERE category=?", (cat,))
+        for pid, ptitle, pdone in c.fetchall():
+            prefix = "✅ " if pdone else "# "
+            if st.button(f"{prefix} {ptitle}", key=f"nav_{pid}"):
+                st.session_state.active_project = pid
+                st.session_state.view = "project_view"
+                st.rerun()
+
+    st.divider()
+    if st.button("➕ Create Category"):
+        st.session_state.view = "create_category"
+        st.rerun()
+
+# --- MAIN CONTENT AREA ---
+
+# 1. SPLASH SCREEN (HOME)
+if st.session_state.view == "home":
+    st.title("Welcome back, User")
     col1, col2 = st.columns(2)
-    
     with col1:
-        if st.button("🔳 CREATE NEW TASK", use_container_width=True):
-            st.session_state.page = "app"
-            st.session_state.auto_open_add = True
+        if st.button("🔳\n\nCreate New Task", height=150):
+            st.session_state.view = "create_project"
             st.rerun()
-            
     with col2:
-        if st.button("🗂️ OPEN EXISTING TASKS", use_container_width=True):
-            st.session_state.page = "app"
-            st.rerun()
-    st.stop()
-
-# --- MAIN APP LOGIC ---
-if st.session_state.page == "app":
-    # Sidebar Searchable User Dropdown
-    c.execute("SELECT email FROM users")
-    user_list = [r[0] for r in c.fetchall()]
-    
-    with st.sidebar:
-        st.title("🍔 Menu")
-        if st.button("⬅️ Back to Splash"): 
-            st.session_state.page = "splash"
-            st.rerun()
-        
-        st.divider()
-        st.header("Project Tree")
-        c.execute("SELECT name FROM categories")
-        categories = [r[0] for r in c.fetchall()]
-        
-        selected_cat = st.radio("Categories", ["All"] + categories)
-
-    # Project Creation Form
-    with st.expander("➕ Create a New Task", expanded=st.session_state.get("auto_open_add", False)):
-        t_title = st.text_input("Project Name")
-        t_assign = st.selectbox("Assign Project to User (Searchable)", ["Unassigned"] + user_list)
-        t_cat = st.selectbox("Category", categories if categories else ["General"])
-        t_details = st.text_area("Project Details", help="Supports **Bold**, *Italics*, and - Bullet Points")
-        
-        if st.button("Launch Project"):
-            c.execute("INSERT INTO projects (owner, assigned_to, category, title, importance, details, is_done) VALUES (?,?,?,?,?,?,?)",
-                      ("Admin", t_assign, t_cat, t_title, "Medium", t_details, 0))
-            conn.commit()
-            st.toast(f"New Project Created: {t_title}", icon="🚀")
+        if st.button("📂\n\nView All Tasks", height=150):
+            st.session_state.active_project = None # Logic to show list
             st.rerun()
 
-    # The Project List
-    st.header(f"Showing: {selected_cat}")
-    query = "SELECT * FROM projects" if selected_cat == "All" else f"SELECT * FROM projects WHERE category='{selected_cat}'"
-    c.execute(query)
-    
-    for p in c.fetchall():
-        card_style = "project-card-grey" if p[7] else "project-card-white"
+# 2. CREATE CATEGORY
+elif st.session_state.view == "create_category":
+    st.subheader("New Category")
+    new_cat_name = st.text_input("Name")
+    if st.button("Save Category"):
+        c.execute("INSERT OR IGNORE INTO categories VALUES (?)", (new_cat_name,))
+        conn.commit()
+        st.session_state.view = "home"
+        st.rerun()
+
+# 3. CREATE PROJECT
+elif st.session_state.view == "create_project":
+    st.subheader(f"New Project in {st.session_state.get('target_cat', 'General')}")
+    p_title = st.text_input("Project Name")
+    p_details = st.text_area("Project Details (Markdown supported)")
+    if st.button("Create Project"):
+        cat = st.session_state.get('target_cat', 'General')
+        c.execute("INSERT INTO projects (category, title, details, is_done) VALUES (?,?,?,?)", (cat, p_title, p_details, 0))
+        conn.commit()
+        st.session_state.view = "home"
+        st.rerun()
+
+# 4. PROJECT VIEW (SELECTED)
+elif st.session_state.view == "project_view":
+    c.execute("SELECT * FROM projects WHERE id=?", (st.session_state.active_project,))
+    proj = c.fetchone()
+    if proj:
+        style = "project-card-done" if proj[4] else "project-card"
+        st.markdown(f"<div class='{style}'>", unsafe_allow_html=True)
+        st.title(proj[2])
+        st.caption(f"Category: {proj[1]}")
+        st.markdown("### Project Details")
+        st.markdown(proj[3])
         
-        with st.container():
-            st.markdown(f"<div class='{card_style}'>", unsafe_allow_html=True)
-            col_txt, col_btn = st.columns([4,1])
-            with col_txt:
-                st.subheader(f"{p[4]}")
-                st.write(f"👤 **Responsible:** {p[2]}")
-                st.markdown(p[6]) # Renders Markdown details
-            with col_btn:
-                if not p[7]:
-                    if st.button("Mark Complete", key=f"done_{p[0]}"):
-                        c.execute("UPDATE projects SET is_done=1 WHERE id=?", (p[0],))
-                        conn.commit()
-                        st.toast(f"Project '{p[4]}' is Finished!", icon="✅")
-                        st.rerun()
-            
-            # --- CHAT SECTION ---
-            with st.expander("💬 Comments & Chat"):
-                c.execute("SELECT user, msg, timestamp FROM comments WHERE project_id=?", (p[0],))
-                for com in c.fetchall():
-                    st.caption(f"**{com[0]}** ({com[2]}): {com[1]}")
-                
-                new_msg = st.text_input("Add a comment...", key=f"msg_{p[0]}")
-                if st.button("Send", key=f"send_{p[0]}"):
-                    ts = datetime.now().strftime("%H:%M")
-                    c.execute("INSERT INTO comments (project_id, user, msg, timestamp) VALUES (?,?,?,?)",
-                              (p[0], "User", new_msg, ts))
-                    conn.commit()
-                    st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.divider()
+        if not proj[4]:
+            if st.button("Mark as Complete"):
+                c.execute("UPDATE projects SET is_done=1 WHERE id=?", (proj[0],))
+                conn.commit()
+                st.toast("Project completed!")
+                st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
