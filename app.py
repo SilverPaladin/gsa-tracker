@@ -275,10 +275,12 @@ elif st.session_state.page == "mod_detail":
                         st.rerun()
         with c2:
             st.subheader("Discussion")
+            # REMOVED dividers to compact chat
             chat = st.container(height=400, border=True)
             for msg in m.get('discussion', []):
                 chat.markdown(f"**{msg['user']}**: {msg['text']}")
-                chat.divider()
+                # No chat.divider() here -> creates continuous log look
+            
             with st.form("chat"):
                 txt = st.text_input("Message")
                 if st.form_submit_button("Send") and txt:
@@ -375,12 +377,10 @@ elif st.session_state.page == "json_editor":
     else:
         col_editor, col_tools = st.columns([2, 1])
         
-        # --- LEFT COLUMN: EDITOR ---
         with col_editor:
             with st.container(border=True):
                 st.subheader("📁 Configuration File Manager")
                 c_load, c_save = st.columns(2)
-                
                 with c_load:
                     config_names = [c['name'] for c in DB.get('server_configs', [])]
                     selected_conf = st.selectbox("Load Saved Config", ["Select..."] + config_names)
@@ -391,7 +391,6 @@ elif st.session_state.page == "json_editor":
                             st.session_state.main_json_editor = found['content'] 
                             st.success(f"Loaded '{selected_conf}'!")
                             st.rerun()
-                
                 with c_save:
                     new_conf_name = st.text_input("Save Current as...")
                     if st.button("💾 Save as Preset") and new_conf_name:
@@ -400,7 +399,6 @@ elif st.session_state.page == "json_editor":
                         save_db(DB)
                         st.success(f"Saved '{new_conf_name}'!")
                         st.rerun()
-                
                 if selected_conf != "Select...":
                     if st.button("🗑️ Delete Selected Preset"):
                         DB['server_configs'] = [c for c in DB['server_configs'] if c['name'] != selected_conf]
@@ -411,68 +409,70 @@ elif st.session_state.page == "json_editor":
             st.divider()
             st.subheader("Active JSON Editor")
             st.caption("Press 'Ctrl+A' then 'Ctrl+C' inside the box to copy everything.")
-            # Height 700 matches the right container
-            json_text = st.text_area("JSON Output", value=st.session_state.editor_content, height=700, key="main_json_editor")
+            json_text = st.text_area("JSON Output", value=st.session_state.editor_content, height=600, key="main_json_editor")
             st.session_state.editor_content = json_text
 
         # --- RIGHT COLUMN: TOOLS & LIBRARY ---
         with col_tools:
-            # THIS CONTAINER PROVIDES THE SCROLLABLE WINDOW EFFECT
-            with st.container(height=950, border=True):
-                tab_search, tab_saved, tab_import = st.tabs(["🌐 Search", "💾 Library", "📥 Import"])
+            # FIX: Place Tabs OUTSIDE the scrollable container to effectively "Stick" them to the top
+            tab_search, tab_saved, tab_import = st.tabs(["🌐 Search", "💾 Library", "📥 Import"])
+            
+            with tab_search:
+                st.info("💡 **Tip:** Type a name to find the link, then Paste the URL to fetch data.")
+                search_term = st.text_input("1. Search Term", placeholder="e.g. RHS Status Quo")
+                if search_term:
+                    st.link_button(f"🌐 Open Search: '{search_term}'", f"https://reforger.armaplatform.com/workshop?search={search_term}")
                 
-                with tab_search:
-                    st.info("💡 **Tip:** Type a name to find the link, then Paste the URL to fetch data.")
-                    search_term = st.text_input("1. Search Term", placeholder="e.g. RHS Status Quo")
-                    if search_term:
-                        st.link_button(f"🌐 Open Search: '{search_term}'", f"https://reforger.armaplatform.com/workshop?search={search_term}")
-                    
-                    st.divider()
-                    st.write("**2. Paste Workshop URL**")
-                    fetch_url = st.text_input("Paste URL here to auto-fetch", placeholder="https://reforger.armaplatform.com/workshop/...")
-                    
-                    if st.button("🚀 Fetch Details"):
-                        if fetch_url:
-                            mid, mname, mimg, mver = fetch_mod_details(fetch_url)
-                            if mname:
-                                st.session_state.fetched_mod = {
-                                    "modId": mid, "name": mname, "version": mver, "image_url": mimg
-                                }
-                                st.success("Found!")
-                            else: st.error("Could not find mod. Check URL.")
-                    
+                st.divider()
+                st.write("**2. Paste Workshop URL**")
+                fetch_url = st.text_input("Paste URL here to auto-fetch", placeholder="https://reforger.armaplatform.com/workshop/...")
+                
+                if st.button("🚀 Fetch Details"):
+                    if fetch_url:
+                        mid, mname, mimg, mver = fetch_mod_details(fetch_url)
+                        if mname:
+                            st.session_state.fetched_mod = {
+                                "modId": mid, "name": mname, "version": mver, "image_url": mimg
+                            }
+                            st.success("Found!")
+                        else: st.error("Could not find mod. Check URL.")
+                
+                # Scrollable results for search
+                with st.container(height=500, border=True):
                     if st.session_state.fetched_mod:
                         mod = st.session_state.fetched_mod
-                        with st.container(border=True):
-                            if mod['image_url']: st.image(mod['image_url'])
-                            st.subheader(mod['name'])
-                            
-                            clean_mod = {"modId": mod['modId'], "name": mod['name'], "version": ""}
-                            st.code(json.dumps(clean_mod, indent=4), language='json')
-                            
-                            c1, c2 = st.columns(2)
-                            with c1:
-                                if st.button("💾 Save to Library"):
-                                    DB['mod_library'].append(mod)
-                                    save_db(DB)
-                                    st.success("Saved!")
-                            with c2:
-                                if st.button("➕ Add to Editor"):
-                                    snippet = json.dumps(clean_mod, indent=4)
-                                    cur = st.session_state.editor_content.strip()
-                                    if not cur: cur = "[]"
-                                    if cur.endswith("]"): 
-                                        if len(cur) > 2: new_s = cur[:-1] + ",\n" + snippet + "\n]"
-                                        else: new_s = "[\n" + snippet + "\n]"
-                                    else: new_s = cur + ",\n" + snippet
-                                    st.session_state.editor_content = new_s
-                                    st.session_state.main_json_editor = new_s
-                                    st.rerun()
+                        if mod['image_url']: st.image(mod['image_url'])
+                        st.subheader(mod['name'])
+                        
+                        clean_mod = {"modId": mod['modId'], "name": mod['name'], "version": ""}
+                        st.code(json.dumps(clean_mod, indent=4), language='json')
+                        
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if st.button("💾 Save to Library"):
+                                DB['mod_library'].append(mod)
+                                save_db(DB)
+                                st.success("Saved!")
+                        with c2:
+                            if st.button("➕ Add to Editor"):
+                                snippet = json.dumps(clean_mod, indent=4)
+                                cur = st.session_state.editor_content.strip()
+                                if not cur: cur = "[]"
+                                if cur.endswith("]"): 
+                                    if len(cur) > 2: new_s = cur[:-1] + ",\n" + snippet + "\n]"
+                                    else: new_s = "[\n" + snippet + "\n]"
+                                else: new_s = cur + ",\n" + snippet
+                                st.session_state.editor_content = new_s
+                                st.session_state.main_json_editor = new_s
+                                st.rerun()
 
-                with tab_saved:
-                    lib_search = st.text_input("Filter Library", placeholder="Filter by name...")
-                    filtered = [m for m in DB['mod_library'] if lib_search.lower() in m.get('name','').lower()]
-                    
+            with tab_saved:
+                # Filter stays at top
+                lib_search = st.text_input("Filter Library", placeholder="Filter by name...")
+                filtered = [m for m in DB['mod_library'] if lib_search.lower() in m.get('name','').lower()]
+                
+                # Scrollable list of mods below filter
+                with st.container(height=600, border=True):
                     if not filtered: st.info("No saved mods.")
                     for mod in filtered:
                         with st.container(border=True):
@@ -507,32 +507,32 @@ elif st.session_state.page == "json_editor":
                                     DB['mod_library'].pop(idx)
                                     save_db(DB)
                                     st.rerun()
+            
+            with tab_import:
+                st.subheader("Batch Importer")
+                st.caption("Paste a full JSON file or a list of mods. We will extract every mod block and save it to your library.")
+                import_text = st.text_area("Paste JSON Here", height=300)
                 
-                with tab_import:
-                    st.subheader("Batch Importer")
-                    st.caption("Paste a full JSON file or a list of mods. We will extract every mod block and save it to your library.")
-                    import_text = st.text_area("Paste JSON Here", height=300)
-                    
-                    if st.button("Process & Import Mods", type="primary"):
-                        try:
-                            pattern = r'\{[^{}]*"modId"[^{}]*\}'
-                            matches = re.findall(pattern, import_text, re.DOTALL)
-                            count_added = 0
-                            existing_ids = [m['modId'] for m in DB['mod_library']]
-                            for match in matches:
-                                try:
-                                    mod_obj = json.loads(match)
-                                    mid = mod_obj.get("modId")
-                                    mname = mod_obj.get("name", "Unknown Imported Mod")
-                                    mver = mod_obj.get("version", "")
-                                    if mid and mid not in existing_ids:
-                                        DB['mod_library'].append({"modId": mid, "name": mname, "version": mver})
-                                        existing_ids.append(mid)
-                                        count_added += 1
-                                except: pass
-                            if count_added > 0:
-                                save_db(DB)
-                                st.success(f"Successfully imported {count_added} new mods to Library!")
-                                st.rerun()
-                            else: st.warning("No new mods found (or all were duplicates).")
-                        except Exception as e: st.error(f"Error processing text: {e}")
+                if st.button("Process & Import Mods", type="primary"):
+                    try:
+                        pattern = r'\{[^{}]*"modId"[^{}]*\}'
+                        matches = re.findall(pattern, import_text, re.DOTALL)
+                        count_added = 0
+                        existing_ids = [m['modId'] for m in DB['mod_library']]
+                        for match in matches:
+                            try:
+                                mod_obj = json.loads(match)
+                                mid = mod_obj.get("modId")
+                                mname = mod_obj.get("name", "Unknown Imported Mod")
+                                mver = mod_obj.get("version", "")
+                                if mid and mid not in existing_ids:
+                                    DB['mod_library'].append({"modId": mid, "name": mname, "version": mver})
+                                    existing_ids.append(mid)
+                                    count_added += 1
+                            except: pass
+                        if count_added > 0:
+                            save_db(DB)
+                            st.success(f"Successfully imported {count_added} new mods to Library!")
+                            st.rerun()
+                        else: st.warning("No new mods found (or all were duplicates).")
+                    except Exception as e: st.error(f"Error processing text: {e}")
