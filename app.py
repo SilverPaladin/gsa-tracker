@@ -15,7 +15,7 @@ st.set_page_config(page_title="Arma Staff Portal", layout="wide")
 SYSTEM_PASSWORD = "001Arma!23" 
 DB_FILE = "portal_data.json"
 
-# --- DATABASE FUNCTIONS (PERSISTENCE) ---
+# --- DATABASE FUNCTIONS ---
 def load_db():
     if not os.path.exists(DB_FILE):
         default_data = {
@@ -26,7 +26,7 @@ def load_db():
             "events": [],
             "tutorials": [],
             "announcements": [],
-            "mod_library": [] # New storage for Mod JSONs
+            "mod_library": []
         }
         with open(DB_FILE, 'w') as f:
             json.dump(default_data, f)
@@ -35,7 +35,7 @@ def load_db():
     try:
         with open(DB_FILE, 'r') as f:
             data = json.load(f)
-            # Migration checks
+            # Ensure keys exist
             if "usernames" not in data: data["usernames"] = {}
             if "mod_library" not in data: data["mod_library"] = []
             return data
@@ -48,48 +48,44 @@ def save_db(data):
 
 DB = load_db()
 
-# --- HELPER: WORKSHOP SCRAPER ---
+# --- HELPER: WORKSHOP SCRAPER (UPDATED FOR IMAGES) ---
 def fetch_mod_details(mod_input):
     """
-    Attempts to fetch Mod Name/Version from Arma Reforger Workshop.
-    Input can be a URL or just an ID.
+    Fetches Name, Version, and IMAGE from Arma Reforger Workshop.
     """
-    # Extract ID from URL if full link provided
     mod_id = mod_input.strip()
     if "reforger.armaplatform.com/workshop/" in mod_id:
-        # Extract ID from URL (e.g., .../workshop/59673B6FBB95459F-BetterTracers)
         try:
             mod_id = mod_id.split("workshop/")[1].split("-")[0]
         except:
-            return None, None, "Invalid URL format"
+            return None, None, None, "Invalid URL format"
     
     url = f"https://reforger.armaplatform.com/workshop/{mod_id}"
     
     try:
-        # Fake user agent to avoid immediate blocking
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=5)
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # 1. Try to find Title
-            # Reforger workshop structure changes, but usually title is in an H1 or OG tag
-            title = soup.find("meta", property="og:title")
-            mod_name = title["content"] if title else "Unknown Mod"
+            # 1. Title
+            title_tag = soup.find("meta", property="og:title")
+            mod_name = title_tag["content"] if title_tag else "Unknown Mod"
             
-            # 2. Try to find Version
-            # This is harder to scrape without rendering JS, so we default to "1.0.0" if not found
-            # Sometimes it's in a specific div class. We'll try a generic search.
+            # 2. Image
+            img_tag = soup.find("meta", property="og:image")
+            mod_img = img_tag["content"] if img_tag else None
+            
+            # 3. Version (Best Guess / Default)
             mod_version = "1.0.0" 
-            # Advanced scraping would go here, but static scraping is limited on React sites.
             
-            return mod_id, mod_name, mod_version
+            return mod_id, mod_name, mod_img, mod_version
         else:
-            return mod_id, None, f"Failed to reach Workshop (Status {response.status_code})"
+            return mod_id, None, None, f"Status {response.status_code}"
             
     except Exception as e:
-        return mod_id, None, str(e)
+        return mod_id, None, None, str(e)
 
 # --- LOCAL SESSION STATE ---
 if "logged_in" not in st.session_state:
@@ -100,7 +96,6 @@ if "page" not in st.session_state:
     st.session_state.page = "view_announcements"
 if "selected_mod_id" not in st.session_state:
     st.session_state.selected_mod_id = None
-# Editor State
 if "editor_content" not in st.session_state:
     st.session_state.editor_content = "[\n\n]"
 
@@ -389,99 +384,102 @@ elif st.session_state.page == "roles":
             else: st.error("User not found.")
     st.table(pd.DataFrame(DB['role_db'].items(), columns=["Email", "Role"]))
 
-# --- NEW: JSON EDITOR / MOD MANAGER PAGE ---
+# --- JSON EDITOR / MOD MANAGER PAGE ---
 elif st.session_state.page == "json_editor":
     st.title("📝 Mod Configuration Studio")
     if user_role != "SUPER_ADMIN":
         st.error("Access Denied.")
     else:
-        # Layout: Left = Editor, Right = Library
         col_editor, col_library = st.columns([2, 1])
         
         with col_editor:
             st.subheader("Config Editor")
             st.caption("Construct your server 'mods' array here.")
-            # Text area connected to session state to persist changes during clicks
             json_text = st.text_area("JSON Output", value=st.session_state.editor_content, height=600, key="main_json_editor")
-            # Update session state manually if user types in box
             st.session_state.editor_content = json_text
-            
-            if st.button("📋 Copy to Clipboard (Manual)", help="Ctrl+A, Ctrl+C"):
-                st.info("Select all text above and copy it.")
 
         with col_library:
             st.subheader("📦 Mod Library")
+            
+            # SEARCH BAR
+            search_query = st.text_input("🔍 Search Library", placeholder="Type mod name...").lower()
             
             tab_lib, tab_import = st.tabs(["Saved Mods", "Import/Fetch"])
             
             # --- TAB: SAVED MODS ---
             with tab_lib:
-                if not DB['mod_library']:
-                    st.info("Library is empty.")
+                # Filter mods based on search
+                filtered_mods = [
+                    m for m in DB['mod_library'] 
+                    if search_query in m.get('name', '').lower() 
+                    or search_query in m.get('modId', '').lower()
+                ]
+                
+                if not filtered_mods:
+                    if search_query: st.info("No mods found.")
+                    else: st.info("Library is empty.")
                 else:
-                    for idx, mod in enumerate(DB['mod_library']):
+                    for mod in filtered_mods:
                         with st.container(border=True):
+                            # Display Image if available
+                            if mod.get('image_url'):
+                                st.image(mod['image_url'], use_container_width=True)
+                            
                             st.write(f"**{mod.get('name', 'Unknown')}**")
-                            st.caption(f"ID: {mod.get('modId')} | v{mod.get('version')}")
+                            st.caption(f"v{mod.get('version')}")
+                            
+                            # DISPLAY CODE BLOCK (This enables the COPY button)
+                            # We create a clean dictionary for the copy paste
+                            clean_mod = {
+                                "modId": mod.get('modId'),
+                                "name": mod.get('name'),
+                                "version": mod.get('version')
+                            }
+                            st.code(json.dumps(clean_mod, indent=4), language='json')
                             
                             c_add, c_del = st.columns([3, 1])
                             with c_add:
-                                if st.button("➕ Add", key=f"add_mod_{idx}"):
-                                    # Logic to insert into editor
-                                    # We parse current editor content to list, append, dump back
+                                if st.button("➕ Insert to Editor", key=f"add_{mod['modId']}"):
                                     try:
-                                        # Clean up current content to ensure it's a list
                                         current_str = st.session_state.editor_content.strip()
                                         if not current_str: current_str = "[]"
-                                        
-                                        # Basic heuristic: If it ends with ']', remove ']', add comma, add obj, add ']'
-                                        # Or better: Try to load as json, append, dump
-                                        # Note: This is a simple append logic
-                                        new_snippet = json.dumps(mod, indent=4)
-                                        
+                                        new_snippet = json.dumps(clean_mod, indent=4)
                                         if current_str.endswith("]"):
-                                            # It's a list. Insert before last bracket
-                                            if len(current_str) > 2: # Not empty list
-                                                updated_str = current_str[:-1] + ",\n" + new_snippet + "\n]"
-                                            else: # Empty list []
-                                                updated_str = "[\n" + new_snippet + "\n]"
-                                        else:
-                                            # Just append it
-                                            updated_str = current_str + ",\n" + new_snippet
-                                            
+                                            if len(current_str) > 2: updated_str = current_str[:-1] + ",\n" + new_snippet + "\n]"
+                                            else: updated_str = "[\n" + new_snippet + "\n]"
+                                        else: updated_str = current_str + ",\n" + new_snippet
                                         st.session_state.editor_content = updated_str
                                         st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error appending: {e}")
-                            
+                                    except: pass
                             with c_del:
-                                if st.button("🗑️", key=f"del_mod_{idx}"):
-                                    DB['mod_library'].pop(idx)
+                                if st.button("🗑️", key=f"del_{mod['modId']}"):
+                                    # Find index in main DB list (not filtered list)
+                                    real_idx = DB['mod_library'].index(mod)
+                                    DB['mod_library'].pop(real_idx)
                                     save_db(DB)
                                     st.rerun()
 
             # --- TAB: IMPORT / FETCH ---
             with tab_import:
-                st.write("**Method 1: Fetch from Workshop**")
+                st.write("**Fetch from Workshop**")
                 search_input = st.text_input("Workshop ID or URL", placeholder="59673B6FBB95459F")
                 if st.button("🔍 Fetch & Save"):
                     if search_input:
-                        mid, mname, mver = fetch_mod_details(search_input)
+                        mid, mname, mimg, mver = fetch_mod_details(search_input)
                         if mname:
-                            new_mod = {"modId": mid, "name": mname, "version": mver}
+                            new_mod = {"modId": mid, "name": mname, "version": mver, "image_url": mimg}
                             DB['mod_library'].append(new_mod)
                             save_db(DB)
                             st.success(f"Saved: {mname}")
                         else:
                             st.error(f"Error: {mver}")
-                            # Fallback form
                             st.warning("Could not scrape. Enter manually below.")
                 
-                with st.expander("Manual Entry / Fallback"):
+                with st.expander("Manual Entry"):
                     m_id = st.text_input("Mod ID")
                     m_name = st.text_input("Mod Name")
                     m_ver = st.text_input("Version", value="1.0.0")
-                    if st.button("Save Manual Entry"):
+                    if st.button("Save Manual"):
                         if m_id and m_name:
                             DB['mod_library'].append({"modId": m_id, "name": m_name, "version": m_ver})
                             save_db(DB)
@@ -489,29 +487,21 @@ elif st.session_state.page == "json_editor":
                             st.rerun()
                 
                 st.divider()
-                st.write("**Method 2: Batch Paste**")
-                batch_text = st.text_area("Paste existing JSON blob here", height=150)
+                st.write("**Batch Paste**")
+                batch_text = st.text_area("Paste existing JSON blob", height=150)
                 if st.button("Process Batch"):
-                    # Regex to find JSON objects with modId
                     try:
-                        # Find all blocks that look like {"modId": ...}
-                        # This regex is loose to allow for messy input
                         matches = re.findall(r'\{[^{}]*"modId"[^{}]*\}', batch_text, re.DOTALL)
                         count = 0
                         for match in matches:
                             try:
-                                # Try to parse each match
                                 mod_obj = json.loads(match)
                                 if "modId" in mod_obj:
                                     DB['mod_library'].append(mod_obj)
                                     count += 1
                             except: pass
-                        
                         if count > 0:
                             save_db(DB)
                             st.success(f"Imported {count} mods!")
                             st.rerun()
-                        else:
-                            st.warning("No valid mod objects found.")
-                    except Exception as e:
-                        st.error(str(e))
+                    except Exception as e: st.error(str(e))
