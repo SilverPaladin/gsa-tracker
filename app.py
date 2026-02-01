@@ -26,22 +26,14 @@ st.markdown("""
     .main { background-color: #131314; color: #e3e3e3; font-family: 'Google Sans', sans-serif; }
     [data-testid="stSidebar"] { background-color: #1e1f20 !important; border-right: none !important; }
     
-    /* Clean Cards & Inputs */
-    .stTextInput>div>div>input, .stTextArea>div>textarea, .stSelectbox>div>div {
-        background-color: #1e1f20 !important;
-        border: 1px solid #444746 !important;
-        border-radius: 12px !important;
-        color: #e3e3e3 !important;
-    }
-
-    /* Importance Dots (Pulsating) */
+    /* Importance Dots - Pulsating Neon Glow */
     .priority-dot {
         height: 10px; width: 10px; border-radius: 50%; display: inline-block; margin-right: 12px;
     }
-    .dot-Critical { background-color: #ff4b4b; box-shadow: 0 0 8px #ff4b4b; }
-    .dot-High     { background-color: #ffa500; box-shadow: 0 0 8px #ffa500; }
-    .dot-Medium   { background-color: #00d4ff; box-shadow: 0 0 8px #00d4ff; }
-    .dot-Low      { background-color: #4b89ff; box-shadow: 0 0 8px #4b89ff; }
+    .dot-Critical { background-color: #ff4b4b; box-shadow: 0 0 10px #ff4b4b; } /* Level 4: Red */
+    .dot-High     { background-color: #ffa500; box-shadow: 0 0 10px #ffa500; } /* Level 3: Orange */
+    .dot-Medium   { background-color: #00d4ff; box-shadow: 0 0 10px #00d4ff; } /* Level 2: Sky Blue */
+    .dot-Low      { background-color: #4b89ff; box-shadow: 0 0 10px #4b89ff; } /* Level 1: Deep Blue */
 
     /* Gemini Pill Buttons */
     .stButton>button {
@@ -65,7 +57,7 @@ def img_to_base64(image):
     image.save(buffered, format="PNG")
     return base64.b64encode(buffered.getvalue()).decode()
 
-# --- 4. NAVIGATION LOGIC ---
+# --- 4. SESSION STATE & NAVIGATION ---
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "view" not in st.session_state: st.session_state.view = "home"
 
@@ -78,25 +70,25 @@ if not st.session_state.logged_in:
         with t1:
             e = st.text_input("Email")
             p = st.text_input("Password", type="password")
-            if st.button("Continue"):
+            if st.button("Unlock Dashboard"):
                 res = c.execute("SELECT username FROM users WHERE email=? AND password=?", (e, p)).fetchone()
                 if res: 
                     st.session_state.logged_in = True
                     st.session_state.user_name = res[0]
                     st.rerun()
         with t2:
-            nu = st.text_input("Name")
-            ne = st.text_input("Email Address")
-            np = st.text_input("Create Password", type="password")
-            if st.button("Initialize Identity"):
+            nu = st.text_input("Username")
+            ne = st.text_input("Email")
+            np = st.text_input("Password", type="password")
+            if st.button("Create Account"):
                 c.execute("INSERT INTO users VALUES (?,?,?)", (ne, np, nu)); conn.commit()
-                st.success("Registered.")
+                st.success("Identity Created.")
     st.stop()
 
 # --- 5. SIDEBAR ---
 with st.sidebar:
     st.markdown(f"<h3 style='padding: 10px 0;'>✨ {st.session_state.user_name}</h3>", unsafe_allow_html=True)
-    if st.button("🏠 Home Dashboard", use_container_width=True): st.session_state.view = "home"; st.rerun()
+    if st.button("🏠 Home", use_container_width=True): st.session_state.view = "home"; st.rerun()
     st.divider()
     
     cats = [r[0] for r in c.execute("SELECT name FROM categories").fetchall()]
@@ -122,14 +114,22 @@ if st.session_state.view == "home":
 
 elif st.session_state.view == "create_project":
     st.markdown("<h2>New Task</h2>", unsafe_allow_html=True)
+    # LIVE REFRESH OF USER LIST
     users = [r[0] for r in c.execute("SELECT username FROM users").fetchall()]
     cats = [r[0] for r in c.execute("SELECT name FROM categories").fetchall()]
     
     with st.container(border=True):
         p_cat = st.selectbox("Category", cats if cats else ["General"])
         p_title = st.text_input("Task Title")
-        p_user = st.selectbox("Assign User", users) # Your username appears here
-        p_imp = st.select_slider("Importance", options=["Low", "Medium", "High", "Critical"])
+        p_user = st.selectbox("Assign to Team Member", users)
+        
+        # THE 4-LEVEL IMPORTANCE SLIDER
+        p_imp = st.select_slider(
+            "Importance Level", 
+            options=["Low", "Medium", "High", "Critical"],
+            help="Low (Deep Blue) -> Critical (Glowing Red)"
+        )
+        
         p_details = st.text_area("Task Details")
         if st.button("Initialize Project"):
             c.execute("INSERT INTO projects (category, title, details, assigned_user, is_done, importance) VALUES (?,?,?,?,0,?)", 
@@ -142,7 +142,7 @@ elif st.session_state.view == "view_project":
         col_main, col_chat = st.columns([2, 1], gap="large")
         with col_main:
             st.markdown(f"<h1>{p[2]}</h1>", unsafe_allow_html=True)
-            st.markdown(f"<p style='color:#a8c7fa;'>{p[1]} • {p[4]}</p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='color:#a8c7fa;'>📂 {p[1]} • 👤 {p[4]}</p>", unsafe_allow_html=True)
             st.write(p[3])
         
         with col_chat:
@@ -157,9 +157,9 @@ elif st.session_state.view == "view_project":
                     st.divider()
             
             with st.container(border=True):
-                # Gemini Multi-modal input style
+                # Paste/Upload Section
                 up_img = st.file_uploader("Attach Image", type=['png','jpg','jpeg'], label_visibility="collapsed")
-                m_in = st.chat_input("Ask a question or post an update...")
+                m_in = st.chat_input("Post an update...")
                 if m_in or up_img:
                     b64 = img_to_base64(Image.open(up_img)) if up_img else None
                     now = datetime.now().strftime("%I:%M %p")
@@ -168,6 +168,6 @@ elif st.session_state.view == "view_project":
 
 elif st.session_state.view == "create_cat":
     nc = st.text_input("Category Name")
-    if st.button("Add"):
+    if st.button("Add Category"):
         c.execute("INSERT OR IGNORE INTO categories VALUES (?)", (nc,))
         conn.commit(); st.session_state.view = "home"; st.rerun()
