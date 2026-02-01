@@ -2,7 +2,8 @@ import streamlit as st
 import sqlite3
 
 # --- DATABASE SETUP ---
-conn = sqlite3.connect('gsa_v2026.db', check_same_thread=False)
+# We use a permanent connection name to ensure it stays stable during the session
+conn = sqlite3.connect('gsa_final_v1.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT, username TEXT)')
 c.execute('CREATE TABLE IF NOT EXISTS categories (name TEXT UNIQUE)')
@@ -14,105 +15,101 @@ conn.commit()
 # --- 2026 MODERN UI STYLING ---
 st.markdown("""
 <style>
-    /* Global Styles */
     .main { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); color: white; }
-    [data-testid="stSidebar"] { background-color: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); }
+    [data-testid="stSidebar"] { background-color: rgba(255, 255, 255, 0.03); backdrop-filter: blur(15px); border-right: 1px solid rgba(255,255,255,0.1); }
+    .stTextInput>div>div>input { background-color: rgba(255,255,255,0.05); color: white; border: 1px solid rgba(255,255,255,0.2); }
     
-    /* Splash Screen Glass Cards */
     .glass-card {
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 20px;
-        padding: 40px;
+        padding: 30px;
         text-align: center;
-        transition: 0.4s;
         margin-bottom: 20px;
-    }
-    .glass-card:hover {
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid #5865f2;
-        transform: translateY(-5px);
-    }
-    
-    /* Project Cards */
-    .project-card {
-        background: #ffffff;
-        padding: 25px;
-        border-radius: 15px;
-        color: #1a1a1a;
-        border-left: 10px solid #5865f2;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-    }
-    .project-card-done {
-        background: rgba(255,255,255,0.1);
-        padding: 25px;
-        border-radius: 15px;
-        color: #a0a0a0;
-        border-left: 10px solid #4e5058;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # --- SESSION STATE ---
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
-if "user_name" not in st.session_state: st.session_state.user_name = "Guest"
+if "user_name" not in st.session_state: st.session_state.user_name = ""
 if "view" not in st.session_state: st.session_state.view = "home"
 
-# --- AUTHENTICATION (REPLACED PLACEHOLDER) ---
+# --- AUTHENTICATION FLOW ---
 if not st.session_state.logged_in:
-    st.title("🛡️ GSA Secure Access")
-    t1, t2 = st.tabs(["Login", "Join"])
-    with t2:
-        reg_user = st.text_input("One-Word Username")
-        reg_email = st.text_input("Email")
-        reg_pw = st.text_input("Password", type="password")
-        if st.button("Initialize Account"):
-            c.execute("INSERT INTO users VALUES (?,?,?)", (reg_email, reg_pw, reg_user))
-            conn.commit()
-            st.success("Welcome aboard!")
-    with t1:
-        log_e = st.text_input("Email", key="l_e")
-        log_p = st.text_input("Password", type="password", key="l_p")
-        if st.button("Enter Dashboard"):
-            c.execute("SELECT username FROM users WHERE email=? AND password=?", (log_e, log_p))
-            res = c.fetchone()
-            if res:
-                st.session_state.logged_in = True
-                st.session_state.user_name = res[0]
-                st.rerun()
+    st.markdown("<h1 style='text-align: center;'>GSA SECURE ACCESS</h1>", unsafe_allow_html=True)
+    
+    col_a, col_b, col_c = st.columns([1, 2, 1])
+    with col_b:
+        tab1, tab2 = st.tabs(["EXISTING USER", "NEW IDENTITY"])
+        
+        with tab2:
+            reg_user = st.text_input("One-Word Username", placeholder="e.g. Maverick")
+            reg_email = st.text_input("Email", placeholder="user@gsa.com")
+            reg_pw = st.text_input("Password", type="password")
+            if st.button("INITIALIZE ACCOUNT"):
+                if reg_user and reg_email and reg_pw:
+                    try:
+                        c.execute("INSERT INTO users (email, password, username) VALUES (?,?,?)", (reg_email, reg_pw, reg_user))
+                        conn.commit()
+                        st.success("Identity Verified. Switch to Login tab.")
+                    except sqlite3.IntegrityError:
+                        st.error("This email is already in the system.")
+                else:
+                    st.warning("All fields are mandatory.")
+
+        with tab1:
+            log_e = st.text_input("Email", key="l_e_2026")
+            log_p = st.text_input("Password", type="password", key="l_p_2026")
+            if st.button("UNLOCK DASHBOARD"):
+                c.execute("SELECT username FROM users WHERE email=? AND password=?", (log_e, log_p))
+                result = c.fetchone()
+                if result:
+                    st.session_state.logged_in = True
+                    st.session_state.user_name = result[0]
+                    st.rerun()
+                else:
+                    st.error("Access Denied. Check credentials.")
     st.stop()
 
-# --- SIDEBAR NAV ---
+# --- PROTECTED DASHBOARD ---
 with st.sidebar:
-    st.markdown(f"### Welcome, **{st.session_state.user_name}**")
+    st.markdown(f"### ⚡ **{st.session_state.user_name}**")
     if st.button("🏠 Dashboard"): st.session_state.view = "home"; st.rerun()
-    if st.button("⚙️ Account Settings"): st.session_state.view = "settings"; st.rerun()
+    if st.button("⚙️ Identity Settings"): st.session_state.view = "settings"; st.rerun()
     st.divider()
-    # (Category/Project Tree Logic remains here...)
+    
+    # Quick Navigation Tree
+    st.caption("CORE PROJECTS")
+    c.execute("SELECT name FROM categories")
+    for cat in c.fetchall():
+        st.markdown(f"**{cat[0].upper()}**")
+        c.execute("SELECT id, title FROM projects WHERE category=?", (cat[0],))
+        for p_id, p_title in c.fetchall():
+            if st.button(f"# {p_title}", key=f"nav_{p_id}"):
+                st.session_state.view = "view_project"
+                st.session_state.active_id = p_id
+                st.rerun()
 
-# --- MAIN CONTENT ---
-
-# 1. THE 2026 SPLASH SCREEN
+# --- PAGE ROUTING ---
 if st.session_state.view == "home":
-    st.markdown(f"<h1 style='text-align: center;'>System Online: {st.session_state.user_name}</h1>", unsafe_allow_html=True)
-    st.write("---")
+    st.markdown(f"<h1 style='text-align: center;'>Welcome, {st.session_state.user_name}</h1>", unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("<div class='glass-card'><h2>🔳</h2><h3>Initiate Task</h3><p>Create a new project pipeline</p></div>", unsafe_allow_html=True)
-        if st.button("Launch Creator", key="b1"): 
+        st.markdown("<div class='glass-card'><h2>🔳</h2><h3>Task Initiation</h3><p>Open a new project pipeline</p></div>", unsafe_allow_html=True)
+        if st.button("Launch", key="btn_create"):
             st.session_state.view = "create_project"; st.rerun()
-            
     with col2:
-        st.markdown("<div class='glass-card'><h2>📂</h2><h3>Active Archive</h3><p>Browse existing task trees</p></div>", unsafe_allow_html=True)
-        if st.button("Open Library", key="b2"): 
-            st.toast("Select a project from the sidebar!")
+        st.markdown("<div class='glass-card'><h2>📂</h2><h3>Active Archive</h3><p>Manage current tree</p></div>", unsafe_allow_html=True)
+        if st.button("Browse", key="btn_browse"):
+            st.toast("Use the sidebar to pick a project!", icon="👈")
 
-# 2. ACCOUNT MODIFICATION PANEL
 elif st.session_state.view == "settings":
-    st.title("⚙️ Account Modification")
-    new_display_name = st.text_input("Edit Username", value=st.session_state.user_name)
-    if st.button("Update Identity"):
-        # Logic to update DB
-        st.session_state.user_name = new_display_name
-        st.success("Profile updated.")
+    st.title("⚙️ Identity Settings")
+    new_name = st.text_input("Change Username", value=st.session_state.user_name)
+    if st.button("Sync Profile"):
+        c.execute("UPDATE users SET username=? WHERE username=?", (new_name, st.session_state.user_name))
+        conn.commit()
+        st.session_state.user_name = new_name
+        st.success("Identity Updated.")
